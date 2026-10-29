@@ -72,7 +72,9 @@ namespace
     }
 } // namespace
 
-// argv in UTF-8 on Windows too (the C runtime of the build converts it)
+// On Windows argv is in the ANSI code page, in which UTF-8 text arrives as other bytes: the client
+// writes the request of --request in ASCII, every other character as a \u escape of JSON
+// (PROTOCOL.md)
 int main(int argc, char *argv[])
 {
     const std::string mode = argc == 2 || argc == 3 ? argv[1] : "";
