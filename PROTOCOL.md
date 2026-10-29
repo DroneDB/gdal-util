@@ -82,6 +82,7 @@ Reads what GDAL finds in a raster or a vector file, as far as the entry of a dat
 | `kind` | string | `raster` or `vector`. Required. |
 | `source` | string | `vector` only: the file the user named when `path` is a conversion of it (a DWG converted to a DXF); the drawing's sidecars give its coordinate system. See section 6 for `source64`. |
 | `converted` | boolean | `vector` only: `path` is a conversion of `source`. Default false. |
+| `sidecar` | string | `vector` only: the `.prj` next to `source` that gives a drawing its coordinate system, decided by the client (a client may ignore a `.prj` that is still on disk, for instance one it just removed from its index). An empty string says that none counts. Without the member the server reads the `.prj` it finds. See section 6 for `sidecar64`. |
 
 The result of a probe:
 
@@ -93,6 +94,7 @@ The result of a probe:
 | `wkt` | string | A `GeoRaster` with a geotransform: its projection as WKT text. The entry keeps it as its `projection` property. Absent otherwise. |
 | `pointGeom` | object | A GeoJSON `Point` (`coordinates`: longitude, latitude, 0), WGS84: the centre of the footprint. Absent when there is none. |
 | `polygonGeom` | object | A GeoJSON `Polygon` of one closed ring, WGS84: the footprint (a raster: its corners; a vector: the envelope of the layers). Absent when there is none. |
+| `warning` | string | Present when the probe could only describe the file in part, with what to tell the user (at most 2000 bytes): a CAD drawing whose coordinate system GDAL cannot use keeps `georeferenced` but has no footprint. Absent when the probe is whole. |
 
 `properties` of a `GeoRaster`: `width` and `height` (pixels), `geotransform` (six numbers, when
 the raster has one) and `bands` (an array of objects with `type`, the GDAL name of the data type,
@@ -162,7 +164,7 @@ with an `id` it did not ask for as a broken program.
 File names are bytes, not always text. JSON strings must be valid UTF-8, so a path that is not
 stays intact like this: the member `<name>` is replaced by `<name>64`, holding the standard base64
 (RFC 4648 section 4, with padding) of the raw bytes. This applies to `path`, `out` and the `source`
-param, and works in both directions: a receiver accepts both forms (exactly one of the two); a
+and `sidecar` params, and works in both directions: a receiver accepts both forms (exactly one of the two); a
 sender uses the plain form when the bytes are valid UTF-8 and the base64 form otherwise.
 
 ## 7. Versioning
