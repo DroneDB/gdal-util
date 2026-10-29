@@ -184,7 +184,7 @@ The result is `{}`. A raster without a projection is `error: "unreadable"`. A fu
 ### 3.5 `vector`
 
 ```json
-{"id":11,"op":"vector","path":"/data/ds/parcels.geojson","out":"/data/ds/.ddb/build/.vec-stage-x","params":{}}
+{"id":11,"op":"vector","path":"/data/ds/parcels.geojson","out":"/data/ds/.ddb/build/.vec-stage-x","params":{"threads":4}}
 ```
 
 Builds the outputs of a vector file in the folder `out`, which exists and is empty:
@@ -195,6 +195,7 @@ coordinate system has no tiles: it gets `vec/local.json` (units and extent) inst
 | `params` member | Type | Meaning |
 | --- | --- | --- |
 | `source` | string | The file the user named when `path` is a conversion of it (a DWG converted to a DXF by the client): its sidecars (the `.prj`) give the drawing its coordinate system. See section 6 for `source64`. |
+| `threads` | integer | The most threads the MVT writer may use, 1 to 4096, as for `cog`. Default: what the environment of the process allows (`DDB_BUILD_THREADS`), never one per CPU of the machine. |
 
 The result is `{}`. A file that GDAL cannot open as a vector is `error: "unreadable"`.
 
@@ -324,6 +325,13 @@ What a worker may do once confined (Linux; README.md has the details and the oth
 A worker that goes past a limit ends with `error: "limit"`: an allocation that fails in GDAL, a
 worker the system ends for its cpu time or the size of a file. A one-shot process ended that way
 writes no response; the client reads the signal (`SIGXCPU`, `SIGXFSZ`).
+
+The heap of glibc's allocator is the client's to bound, with `MALLOC_ARENA_MAX` in the environment
+it starts the program with (the allocator reads it once, at the start). A worker of `--serve` runs
+its request on one thread and many workers run at once: `2` keeps the heap of each small. A
+`--request` of `cog` or `vector` runs `threads` threads that allocate all the time; with two arenas
+they wait on each other's locks (a vector build of a few MB on 32 threads took ten times as long,
+most of it in the kernel), so it gets one arena per thread plus one: `threads + 1`.
 
 On Windows the server runs the requests itself, in a Job Object (memory, one process, no access to
 the desktop) and at low integrity, and a thread of the server watches the cpu time of each request:

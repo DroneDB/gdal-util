@@ -119,13 +119,11 @@ namespace gdalutil
                 return thumbnailLimits();
             if (request.op == op::kGeoproject)
                 return geoprojectLimits();
-            if (request.op == op::kCog)
+            if (request.op == op::kCog || request.op == op::kVector)
             {
-                const auto params = tolerant([&] { return raster::cogParamsFromJson(request.params); });
-                return buildLimits(std::max<uint64_t>(hardwareThreads(), static_cast<uint64_t>(std::max(0, params.threads.value_or(0)))));
+                const auto threads = tolerant([&] { return raster::buildThreadsFromJson(request.params); });
+                return buildLimits(std::max<uint64_t>(hardwareThreads(), static_cast<uint64_t>(std::max(0, threads.value_or(0)))));
             }
-            if (request.op == op::kVector)
-                return buildLimits(hardwareThreads());
             return normalizeLimits();
         }
 

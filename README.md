@@ -26,6 +26,10 @@ The protocol is described in [PROTOCOL.md](PROTOCOL.md).
   DroneDB repository); this program holds the modes, the server loop, the worker and the dispatch of
   a request to its operation. The program contains the library (it does not load `libddb`), and the
   only place that allows the opening of user files is this program's `main`.
+* The host bounds the heap of glibc's allocator by the environment it starts the program with:
+  `MALLOC_ARENA_MAX=2` for `--serve` (one thread a worker, many workers), and one arena per thread
+  of the build plus one for the `--request` of `cog` and `vector`, whose threads would otherwise
+  wait on the locks of two arenas (PROTOCOL.md section 9).
 * Standard output carries the responses and nothing else: the program keeps a private copy of it for
   the responses and points standard output at standard error, so a library that prints cannot
   corrupt a line.
