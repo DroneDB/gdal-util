@@ -42,7 +42,7 @@ such a file: read it, never open a path or a URL in it.
 | --- | --- |
 | `gdal-util --version` | Prints one line, `gdal-util <version> protocol <major>.<minor>`, and exits 0. `<version>` is the version of the DroneDB build that contains the program. Nothing else is initialised. |
 | `gdal-util --serve` | Serves the requests of this document on standard input and output. File paths are never taken from the command line in this mode. |
-| `gdal-util --request '<json>'` | Handles the one request given as the argument, in this process, writes its response line to standard output and exits 0 when the response is a success and 1 when it is a failure. Later versions write progress lines (`{"progress":<number>}`) before the response of an operation that runs long; no operation of this version does. |
+| `gdal-util --request '<json>'` | Handles the one request given as the argument, in this process, writes its response line to standard output and exits 0 when the response is a success and 1 when it is a failure. An operation that runs long (`cog`) writes progress lines before the response, each a line of its own: `{"progress":<number>}`, the fraction done from 0 to 1, rising. The operations `cog` and `vector` run only in this mode. |
 | `gdal-util --sandbox-report` | Prints what confines the workers of the program. |
 | anything else | Prints a usage line to standard error and exits 2. |
 
@@ -56,9 +56,9 @@ Every request is an object:
 | Member | Type | Meaning |
 | --- | --- | --- |
 | `id` | integer | A signed 64-bit integer, echoed in the response. |
-| `op` | string | The operation: `probe` or `thumbnail`. The operations `normalize`, `geoproject`, `cog` and `vector` are reserved: this version answers them with `error: "internal"`. |
+| `op` | string | The operation: `probe`, `thumbnail`, `geoproject`, `cog` or `vector`. The operation `normalize` is reserved: this version answers it with `error: "internal"`. |
 | `path` | string | The file to read: an absolute path. See section 6 for `path64`. |
-| `out` | string | The file to write, an absolute path, for the operations that write (`thumbnail`). The folder it lies in exists and is the only place the operation writes to. See section 6 for `out64`. |
+| `out` | string | The file to write (a folder, for `vector`), an absolute path, for the operations that write (`thumbnail`, `geoproject`, `cog`, `vector`). The folder it lies in exists and is the only place the operation writes to (for `cog`, a scratch file or two of GDAL and the statistics beside the COG). See section 6 for `out64`. |
 | `params` | object | The members the operation defines. A missing `params` is an empty object. |
 
 Members a request does not define are ignored, so that later minor versions can add optional
@@ -131,6 +131,60 @@ The result is `{"bytes": <size of the file written>}`. For a JPEG that carries a
 same framing at least `size` pixels long (a Multi-Picture Format preview), the thumbnail is
 decoded from the preview.
 
+### 3.3 `geoproject`
+
+```json
+{"id":9,"op":"geoproject","path":"/data/ds/photo.jpg","out":"/tmp/ddb/req-2/geoprojected.tif","params":{"width":4000,"height":3000,"footprint":[[9.1,45.3],[9.1,45.2],[9.2,45.2],[9.2,45.3]],"outsize":"100%"}}
+```
+
+Places a photo on the ground and writes it to `out` as a GeoTIFF (JPEG compressed, with an alpha
+band). The helper reads no EXIF: the client says where the photo is.
+
+| `params` member | Type | Meaning |
+| --- | --- | --- |
+| `width`, `height` | integer | The size of the photo in pixels, 1 to 1 000 000. Required. |
+| `footprint` | array | The ground position of the four corners of the photo, each `[longitude, latitude]` in EPSG:4326, in the order upper left, lower left, lower right, upper right. Required. |
+| `outsize` | string | The size of the result as `gdal_translate -outsize` takes it: `"100%"`, or a number of pixels of width. Default: as the photo. |
+
+The result is `{}`. A file that GDAL cannot open as a raster is `error: "unreadable"`. An `outsize`
+that is not a positive number is `error: "internal"`.
+
+### 3.4 `cog`
+
+```json
+{"id":10,"op":"cog","path":"/data/ds/ortho.tif","out":"/data/ds/.ddb/build/ab12/cog-temp-x/cog.tif","params":{"threads":4}}
+```
+
+Builds a Cloud Optimized GeoTIFF from a raster with a projection and writes it to `out`, with its
+statistics in `<out>.stats.json`: Web Mercator, tiled in the GoogleMapsCompatible scheme, with
+overviews, compressed with JPEG (8-bit RGB or RGBA) or LZW. The raster is always decoded and
+encoded again, also when it is a COG already: the output is what GDAL wrote, never a copy of the
+bytes of the input.
+
+| `params` member | Type | Meaning |
+| --- | --- | --- |
+| `threads` | integer | The most threads the warp and the compression may use, 1 to 4096; the client holds that many tokens of its own CPU budget. Default: what the environment of the process allows (`DDB_BUILD_THREADS`). |
+
+The result is `{}`. A raster without a projection is `error: "unreadable"`. A full device is
+`error: "nospace"`.
+
+### 3.5 `vector`
+
+```json
+{"id":11,"op":"vector","path":"/data/ds/parcels.geojson","out":"/data/ds/.ddb/build/.vec-stage-x","params":{}}
+```
+
+Builds the outputs of a vector file in the folder `out`, which exists and is empty:
+`vec/source.gpkg` (a GeoPackage of the layers that hold a feature, in EPSG:4326, with a spatial
+index) and `mvt/` (the MVT tiles in EPSG:3857, with `metadata.json`). A CAD drawing without a
+coordinate system has no tiles: it gets `vec/local.json` (units and extent) instead of `mvt/`.
+
+| `params` member | Type | Meaning |
+| --- | --- | --- |
+| `source` | string | The file the user named when `path` is a conversion of it (a DWG converted to a DXF by the client): its sidecars (the `.prj`) give the drawing its coordinate system. See section 6 for `source64`. |
+
+The result is `{}`. A file that GDAL cannot open as a vector is `error: "unreadable"`.
+
 ## 4. Responses
 
 A success: `{"id": <id>, "ok": true, "result": {...}}`. A failure:
@@ -158,6 +212,8 @@ with an `id` it did not ask for as a broken program.
 | Request line, response line | 16 MiB |
 | `message` of a failure | 2000 bytes |
 | Wall time of `probe` and `thumbnail` | 30 s (the client's timeout) |
+| Wall time of `geoproject` | 120 s (the client's timeout) |
+| Time of `cog` and `vector` | no limit of the protocol: the client ends the process after an idle time without a line, or at its maximum run time |
 
 ## 6. Text that is not UTF-8
 

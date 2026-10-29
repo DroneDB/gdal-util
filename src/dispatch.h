@@ -11,7 +11,12 @@ namespace gdalutil
     // Runs the operation of the request in this process and returns its response. Never throws:
     // a failure is a response with the code that tells the host what to do with it
     // (ddb::raster::classify).
-    ddb::raster::Response handleRequest(const ddb::raster::Request &request);
+    //
+    // `progress` is where a long operation (cog, vector, geoproject) reports how far it is. The
+    // request of `--request` has one; a request of `--serve` has none and is refused for these
+    // operations: the long ones run in a process of their own, for as long as they take.
+    ddb::raster::Response handleRequest(const ddb::raster::Request &request,
+                                        const ddb::raster::ProgressCallback *progress = nullptr);
 } // namespace gdalutil
 
 #endif

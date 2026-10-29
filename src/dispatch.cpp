@@ -47,24 +47,56 @@ namespace gdalutil
             return {{"bytes", ec ? 0 : static_cast<uint64_t>(bytes)}};
         }
 
-        json run(const Request &request)
+        // Each of the operations below writes the file (or folder) `out` names; the host checks
+        // it and moves it where it belongs
+        json cog(const Request &request, const raster::ProgressCallback &progress)
+        {
+            const auto params = raster::cogParamsFromJson(request.params);
+            raster::buildCogFile(requiredPath(request.path, "path"), requiredPath(request.out, "out"), params, progress);
+            return json::object();
+        }
+
+        json buildVector(const Request &request)
+        {
+            const auto params = raster::vectorParamsFromJson(request.params);
+            raster::buildVectorFiles(requiredPath(request.path, "path"), requiredPath(request.out, "out"), params);
+            return json::object();
+        }
+
+        json geoproject(const Request &request)
+        {
+            const auto params = raster::geoprojectParamsFromJson(request.params);
+            raster::geoprojectImage(requiredPath(request.path, "path"), requiredPath(request.out, "out"), params);
+            return json::object();
+        }
+
+        json run(const Request &request, const raster::ProgressCallback *progress)
         {
             if (request.op == raster::op::kProbe)
                 return probe(request);
             if (request.op == raster::op::kThumbnail)
                 return thumbnail(request);
-            if (request.op == raster::op::kNormalize || request.op == raster::op::kGeoproject ||
-                request.op == raster::op::kCog || request.op == raster::op::kVector)
+            if (request.op == raster::op::kGeoproject)
+                return geoproject(request);
+            if (request.op == raster::op::kCog || request.op == raster::op::kVector)
+            {
+                // The builds take as long as they take: a process each, which the client waits for
+                // without a deadline of its own (PROTOCOL.md)
+                if (progress == nullptr)
+                    throw raster::ProtocolError("the operation '" + request.op + "' runs only with --request");
+                return request.op == raster::op::kCog ? cog(request, *progress) : buildVector(request);
+            }
+            if (request.op == raster::op::kNormalize)
                 throw raster::ProtocolError("the operation '" + request.op + "' is not available in this version");
             throw raster::ProtocolError("unknown operation '" + request.op + "'");
         }
     } // namespace
 
-    Response handleRequest(const Request &request)
+    Response handleRequest(const Request &request, const raster::ProgressCallback *progress)
     {
         try
         {
-            return Response::success(request.id, run(request));
+            return Response::success(request.id, run(request, progress));
         }
         catch (const std::bad_alloc &)
         {

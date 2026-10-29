@@ -66,7 +66,12 @@ namespace gdalutil
 
     int serveOne(const char *requestLine, int responseFd)
     {
-        const Response response = respondTo(requestLine, [](const raster::Request &request) { return handleRequest(request); });
+        // The progress of a long operation goes to the host as a line of its own, before the response
+        const raster::ProgressCallback progress = [responseFd](double fraction) {
+            writeLine(responseFd, raster::encodeProgress(fraction));
+        };
+        const Response response =
+            respondTo(requestLine, [&progress](const raster::Request &request) { return handleRequest(request, &progress); });
         if (!writeLine(responseFd, raster::encodeResponse(response)))
             return 1;
         return response.ok ? 0 : 1;
