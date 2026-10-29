@@ -125,9 +125,17 @@ Writes the thumbnail of a photo or a raster to `out`, as a WebP file.
 | --- | --- | --- |
 | `size` | integer | The length of the longest side in pixels. Required, greater than 0. |
 | `vis` | object | The visualisation of a raster: the rendering the members choose. Without `vis` the thumbnail is the plain one of the file (the colours of an 8-bit raster; other data stretched to 0-255). With it, even empty, the bands, formula and colormap the members name are rendered. |
+| `thermalTags` | boolean | Whether the EXIF and XMP tags of the file say it is a thermal image (the make and model of a thermal camera, the FLIR or DJI thermal tags). Optional, `false` when absent. |
 
 `vis` members, all strings and all optional: `preset`, `bands` (comma-separated band numbers),
 `formula`, `bandFilter`, `colormap`, `rescale` (`min,max`).
+
+The helper reads no EXIF or other tags of the file. A `formula` without a `bandFilter` takes its
+bands from the sensor the helper detects in the raster; a single-band raster of no known sensor
+gives its band to the thermal formulas when it is thermal: when `thermalTags` is `true`, when its
+JPEG holds a FLIR segment, or when its GDAL metadata says so (a thermal keyword, a temperature
+unit, the scale and offset of a Landsat thermal band). The client reads the tags and sets
+`thermalTags` for such a request.
 
 The result is `{"bytes": <size of the file written>}`. For a JPEG that carries a preview of the
 same framing at least `size` pixels long (a Multi-Picture Format preview), the thumbnail is
