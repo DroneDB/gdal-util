@@ -4,6 +4,7 @@
 #ifndef GDAL_UTIL_SERVER_H
 #define GDAL_UTIL_SERVER_H
 
+#include "confinement.h"
 #include "executor.h"
 
 namespace gdalutil
@@ -16,7 +17,10 @@ namespace gdalutil
     // Runs the one request of the line, in this process, and writes its response line to
     // responseFd. Returns the exit code of the program: 0 when the response is a success, 1 when
     // it is a failure.
-    int serveOne(const char *requestLine, int responseFd);
+    //
+    // The process confines itself for the request first (confinement.h), so call this in a
+    // process that was started for the one request.
+    int serveOne(const char *requestLine, int responseFd, const Confinement &confinement);
 } // namespace gdalutil
 
 #endif

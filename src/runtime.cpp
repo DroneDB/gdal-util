@@ -11,7 +11,9 @@
 #endif
 
 #include "fd_io.h"
+#include "gdal_inc.h"
 #include "gdal_open_policy.h"
+#include "memory_watch.h"
 #include "process_init.h"
 
 namespace gdalutil
@@ -31,6 +33,12 @@ namespace gdalutil
         // initialised here, once: the workers the server forks start with them ready. This
         // starts no thread (the server checks before every fork)
         ddb::registerProcess(false);
+        memory_watch::install();
+        // libddb lets PROJ fetch the grids it lacks, for the host that transforms the coordinates
+        // of its own data. A worker reads files of users: whatever the file names, it contacts no
+        // server. The option is for the contexts made later, the call for the one that exists.
+        CPLSetConfigOption("PROJ_NETWORK", "OFF");
+        OSRSetPROJEnableNetwork(0);
         // This program is where the files of users are opened: nowhere else in the library may
         ddb::gdalopen::enableUserFileOpens();
     }

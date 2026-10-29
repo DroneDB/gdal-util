@@ -14,9 +14,11 @@ endif()
 
 add_executable(gdal-util
     src/main.cpp
+    src/confinement.cpp
     src/dispatch.cpp
     src/executor.cpp
     src/fd_io.cpp
+    src/memory_watch.cpp
     src/runtime.cpp
     src/server.cpp
     src/thread_count.cpp
@@ -28,6 +30,7 @@ target_compile_definitions(gdal-util PRIVATE GDAL_UTIL_VERSION="${APP_VERSION}")
 ddb_embed_library(gdal-util)
 # It opens the files of datasets that can lie deep (cmake/LongPathAware.cmake)
 ddb_long_path_aware(gdal-util)
-target_link_libraries(gdal-util PRIVATE ddb_warnings)
+# The sandbox the workers confine themselves with (vendor/sandbox); it depends on nothing of libddb
+target_link_libraries(gdal-util PRIVATE ddb_warnings ddb_sandbox)
 # The data files libddb looks up next to the executable (PROJ database, GDAL data)
 ddb_stage_runtime_files(gdal-util)

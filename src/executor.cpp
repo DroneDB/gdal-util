@@ -62,9 +62,12 @@ namespace gdalutil
                 const int signal = WTERMSIG(status);
                 const char *described = strsignal(signal);
                 const std::string name = described != nullptr ? described : "unknown signal";
-                // The cpu time limit of a worker ends it with SIGXCPU
+                // The limits of the sandbox end a worker with these signals: cpu time, and the
+                // size of a file it writes
                 if (signal == SIGXCPU)
                     return Response::failure(request.id, ErrorCode::Limit, "the worker used more cpu time than allowed");
+                if (signal == SIGXFSZ)
+                    return Response::failure(request.id, ErrorCode::Limit, "the worker wrote a larger file than allowed");
                 return Response::failure(request.id, ErrorCode::Crashed,
                                          "the worker was killed by signal " + std::to_string(signal) + " (" + name + ")");
             }
@@ -76,7 +79,7 @@ namespace gdalutil
 
         // The worker: handles the one request, writes the response to the pipe and ends without
         // running any exit handler (the state it inherited is not its own to clean up)
-        [[noreturn]] void runWorker(const Request &request, int pipeFd, pid_t serverPid)
+        [[noreturn]] void runWorker(const Confinement &confinement, const Request &request, int pipeFd, pid_t serverPid)
         {
 #ifdef __linux__
             // A server that dies takes its worker along; the check closes the window between
@@ -95,7 +98,9 @@ namespace gdalutil
 
             try
             {
-                const bool written = writeAll(pipeFd, responseLine(handleRequest(request)) + "\n");
+                // Confined before the file is opened: the first thing the worker does with the request
+                const Response response = handleConfined(confinement, request, nullptr, false);
+                const bool written = writeAll(pipeFd, responseLine(response) + "\n");
                 _exit(written ? 0 : kWorkerFailed);
             }
             catch (...)
@@ -110,6 +115,8 @@ namespace gdalutil
         class ForkExecutor : public Executor
         {
           public:
+            explicit ForkExecutor(const Confinement &confinement) : confinement_(confinement) {}
+
             Response execute(const Request &request) override
             {
                 if (const auto threads = threadCount(); threads && *threads != 1)
@@ -137,7 +144,7 @@ namespace gdalutil
                 if (pid == 0)
                 {
                     close(fds[0]);
-                    runWorker(request, fds[1], serverPid);
+                    runWorker(confinement_, request, fds[1], serverPid);
                 }
 
                 close(fds[1]);
@@ -159,6 +166,8 @@ namespace gdalutil
             }
 
           private:
+            const Confinement &confinement_;
+
             // A worker that ended well wrote one complete response line for this request
             static Response verified(const Request &request, const std::string &output)
             {
@@ -181,12 +190,13 @@ namespace gdalutil
 #endif
     } // namespace
 
-    std::unique_ptr<Executor> makePlatformExecutor()
+    std::unique_ptr<Executor> makePlatformExecutor(const Confinement &confinement)
     {
 #ifdef _WIN32
+        (void)confinement;
         return std::make_unique<InProcessExecutor>();
 #else
-        return std::make_unique<ForkExecutor>();
+        return std::make_unique<ForkExecutor>(confinement);
 #endif
     }
 } // namespace gdalutil

@@ -33,17 +33,19 @@ such a file: read it, never open a path or a URL in it.
   answered with `error: "internal"` and an `id` of `null`.
 * On POSIX systems the server handles each request in a worker, a child process that ends after the
   request. A worker that ends without a response (a signal, an exit code, running out of memory or
-  cpu time) is answered with `error: "crashed"`, or `"limit"` when it was the limit that ended it;
-  the server keeps serving. On Windows the server handles the requests itself.
+  cpu time) is answered with `error: "crashed"`, or `"limit"` when it was a limit that ended it
+  (cpu time, the size of a file, memory); the server keeps serving. On Windows the server handles
+  the requests itself. Every worker confines itself before it opens the file of its request
+  (section 9).
 
 ## 2. Command line
 
 | Command | Behaviour |
 | --- | --- |
 | `gdal-util --version` | Prints one line, `gdal-util <version> protocol <major>.<minor>`, and exits 0. `<version>` is the version of the DroneDB build that contains the program. Nothing else is initialised. |
-| `gdal-util --serve` | Serves the requests of this document on standard input and output. File paths are never taken from the command line in this mode. |
+| `gdal-util --serve` | Serves the requests of this document on standard input and output. File paths are never taken from the command line in this mode. In the sandbox mode `strict` it exits with status 3 and a message that names the missing layer, without serving, when this host lacks a layer (section 9). |
 | `gdal-util --request '<json>'` | Handles the one request given as the argument, in this process, writes its response line to standard output and exits 0 when the response is a success and 1 when it is a failure. An operation that runs long (`cog`) writes progress lines before the response, each a line of its own: `{"progress":<number>}`, the fraction done from 0 to 1, rising. The operations `cog` and `vector` run only in this mode. |
-| `gdal-util --sandbox-report` | Prints what confines the workers of the program. |
+| `gdal-util --sandbox-report` | Prints the sandbox mode and, one line per layer, whether this host offers it (section 9), and exits 0 whatever is missing. |
 | anything else | Prints a usage line to standard error and exits 2. |
 
 The version line is matched by the regular expression `protocol ([0-9]+)\.([0-9]+)$`. Clients
@@ -222,7 +224,7 @@ request had none that could be read.
 | --- | --- |
 | `unreadable` | The file cannot be opened or read as what the request needs. |
 | `policy` | The rules for opening user files refuse the file. |
-| `limit` | A limit of the worker was reached: memory, cpu time, file size, or the 16 MiB of a response line. |
+| `limit` | A limit of the worker was reached: memory (an allocation failed), cpu time, file size, or the 16 MiB of a response line. |
 | `crashed` | The worker ended without a response. |
 | `timeout` | The client's deadline passed. Never written by the program; clients use it for their own timeouts. |
 | `nospace` | The device `out` lies on is full. |
@@ -241,6 +243,7 @@ with an `id` it did not ask for as a broken program.
 | Wall time of `normalize` and `geoproject` | 120 s (the client's timeout) |
 | Pixels of a raster to `normalize` | 1 000 000 000 (width times height) |
 | Time of `cog` and `vector` | no limit of the protocol: the client ends the process after an idle time without a line, or at its maximum run time |
+| Cpu time, memory, file size and open files of a worker | by operation, section 9 |
 
 ## 6. Text that is not UTF-8
 
@@ -278,3 +281,40 @@ not json
 ```
 
 (The first response is shortened.)
+
+## 9. Confinement of the workers
+
+A worker, or the process of `--request`, restricts itself before it opens the file of its request.
+How depends on the host, and the environment variable `DDB_GDAL_SANDBOX` says what to do about a
+layer the host lacks:
+
+| Value | Behaviour |
+| --- | --- |
+| `best-effort` (default, also for an empty or unknown value, which is named once on standard error) | Applies the layers the host has. The server writes one warning at start that names the others. |
+| `strict` | Every layer must be there. `--serve` exits with status 3 at start and names the missing layer; `--request` answers with `error: "internal"`, naming it, and runs nothing. |
+| `off` | Applies no layer: only the limits of the host (and its `ulimit`) hold. The process boundary stays. The server says once that it is not confined. |
+
+What a worker may do once confined (Linux; README.md has the details and the other systems):
+
+* **Read** the folder of `path`; the folders of the `source` and `sidecar` params; the folders of
+  the data of GDAL and PROJ, of the files libddb ships and of the program, and of the libraries it
+  loaded; the user directory of PROJ; the system files it needs (`/proc/self`, `/dev/null`,
+  `/dev/urandom`, `/etc/localtime`, the time zone data). Nothing else.
+* **Write** in the folder `out` lies in (the folder `out` is, for `vector`), which the client made
+  for the request and which must exist. Nothing else.
+* **Not** open a network socket, start a program, trace another process or signal another process.
+* **Limits**, set for each request from its operation: cpu time below the client's wait (25 s for
+  `probe` and `thumbnail`, 110 s for `normalize` and `geoproject`; `cog` and `vector` the run time
+  of the client for each thread), address space (a share of the memory of the machine or its
+  container), the size of a file written, open files, no core files. A limit the process already
+  has from its starter (`ulimit`, a container) is never raised.
+
+A worker that goes past a limit ends with `error: "limit"`: an allocation that fails in GDAL, a
+worker the system ends for its cpu time or the size of a file. A one-shot process ended that way
+writes no response; the client reads the signal (`SIGXCPU`, `SIGXFSZ`).
+
+On Windows the server runs the requests itself, in a Job Object (memory, one process, no access to
+the desktop) and at low integrity; it can write only in folders that carry a low integrity label,
+which the client puts on the folder of `out` when it makes it.
+
+`gdal-util --sandbox-report` is the check to run on a production host: every line must say `active`.

@@ -9,7 +9,7 @@ loads libddb. DroneDB runs it as a child process and talks to it over a line-bas
 gdal-util --version              # gdal-util <version> protocol <major>.<minor>
 gdal-util --serve                # answer the requests of PROTOCOL.md on stdin/stdout
 gdal-util --request '<json>'     # one request, one response line on stdout
-gdal-util --sandbox-report       # what confines the workers
+gdal-util --sandbox-report       # the sandbox mode and what this host offers (release check)
 ```
 
 The protocol is described in [PROTOCOL.md](PROTOCOL.md).
@@ -27,6 +27,61 @@ The protocol is described in [PROTOCOL.md](PROTOCOL.md).
 * Standard output carries the responses and nothing else: the program keeps a private copy of it for
   the responses and points standard output at standard error, so a library that prints cannot
   corrupt a line.
+
+## Sandbox
+
+A worker is a process that opens a file nobody trusts, so it restricts itself first, before it
+opens anything (`src/confinement.cpp` decides what, the library in `vendor/sandbox` of DroneDB
+does it). `DDB_GDAL_SANDBOX` chooses what happens on a host that lacks a layer:
+
+| `DDB_GDAL_SANDBOX` | |
+| --- | --- |
+| `best-effort` (default) | applies the layers the host has; the server writes one warning at start that names the missing ones |
+| `strict` | refuses to start (`--serve`, exit status 3) or to run (`--request`, an `internal` response) and names the missing layer |
+| `off` | applies no layer; the process boundary stays. For diagnosis, never a production setting |
+
+The layers on Linux, in the order they are applied: resource limits (`rlimits`), `oom_score_adj`
+1000 so the host is not the process the kernel kills first (`oom-score`), `no_new_privs`, Landlock
+(`landlock`) and a seccomp filter (`seccomp`) that refuses sockets, `execve`, namespaces, `ptrace`
+and the signals to other processes. macOS has the resource limits. Windows has a Job Object and a
+low integrity level. `gdal-util --sandbox-report` prints the mode and each layer as `<name>:
+active|missing (<why>)` and exits 0.
+
+**Release check.** After installing a package, on the machine or in the container that will run
+it, `gdal-util --sandbox-report` must show every layer `active`. A line that says `missing` is a
+host that confines less (an old kernel, a container profile that hides Landlock or seccomp):
+production then runs with the other layers and one warning in the log, or, with
+`DDB_GDAL_SANDBOX=strict`, does not start the helper.
+
+What each request is allowed:
+
+| | |
+| --- | --- |
+| Read | the folder of `path`; the folders of the `source` and `sidecar` params; the folder of the program, the libraries it loaded and the data files libddb ships (`proj.db`, `sensor_data.sqlite`, `timezone21.bin`, GDAL data); `GDAL_DATA`, `PROJ_DATA` and `PROJ_LIB`; the user directory of PROJ; `/proc/self`, `/dev/null`, `/dev/urandom`, `/etc/localtime`, `/usr/share/zoneinfo` |
+| Write | the folder `out` lies in (for `vector`, `out` itself), which the client made |
+| Never | network sockets, `execve`, namespaces, signals to other processes |
+
+| Operation | cpu time | address space | file written | open files |
+| --- | --- | --- | --- | --- |
+| `probe` | 25 s | 1/4 of the memory, at least 2 GiB | 16 MiB | 256 |
+| `thumbnail` | 25 s | 1/4, at least 2 GiB | 64 MiB | 256 |
+| `normalize` | 110 s | 1/2, at least 4 GiB | 128 GiB | 1024 |
+| `geoproject` | 110 s | 1/2, at least 4 GiB | 16 GiB | 1024 |
+| `cog`, `vector` | `DDB_GDAL_UTIL_MAX_SECONDS` (12 h) for each thread the machine has | 3/4, at least 4 GiB | 1 TiB (a runaway file) | 4096 |
+
+The cpu time of the first four ends a little before the client's 30 s and 120 s, so the answer is
+`limit` and not a worker the client killed. The memory is that of the machine, or of its control
+group in a container, whichever is less; the limit counts what is mapped (libraries and stacks
+too), not only what is used. None of these can be raised past what the process already has: an
+operator who wants less starts the program under `ulimit` or the limits of the container. A
+worker that goes past a limit is answered with `limit`: the system ends it for its cpu time
+(`SIGXCPU`) or the size of a file (`SIGXFSZ`), and an allocation that fails in GDAL fails the
+request with the same code. `PROJ_NETWORK` is off in the program, whatever the host says.
+
+On Windows the server runs the requests itself, so the Job Object limits the whole life of the
+process: memory, one active process, no access to the desktop, but no cpu time (the client's
+deadlines end a request that does not finish). Its low integrity level lets it write only in
+folders with a low integrity label, which the client sets on the folder of `out`.
 
 ## Build
 

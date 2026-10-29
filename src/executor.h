@@ -6,6 +6,7 @@
 
 #include <memory>
 
+#include "confinement.h"
 #include "raster_protocol.h"
 
 namespace gdalutil
@@ -23,8 +24,10 @@ namespace gdalutil
         virtual ddb::raster::Response execute(const ddb::raster::Request &request) = 0;
     };
 
-    // The executor of the platform
-    std::unique_ptr<Executor> makePlatformExecutor();
+    // The executor of the platform. On POSIX systems each worker confines itself with the
+    // confinement before it opens anything; the confinement outlives the executor. On Windows the
+    // server confines itself once, before it serves (Confinement::startServer).
+    std::unique_ptr<Executor> makePlatformExecutor(const Confinement &confinement);
 } // namespace gdalutil
 
 #endif
