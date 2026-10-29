@@ -10,6 +10,7 @@
 #include <string>
 #include <system_error>
 
+#include "gdal_raii.h"
 #include "logger.h"
 #include "memory_watch.h"
 #include "mio.h"
@@ -82,19 +83,34 @@ namespace gdalutil
 
         using Operation = std::function<json()>;
 
+        // An operation that is not a build runs under a cpu time limit a little below the time the
+        // client waits for it (confinement.cpp), and the cpu time of a process is that of all its
+        // threads: GDAL runs it on the calling thread only. Otherwise some formats decode on one
+        // thread per CPU (a JPEG 2000, a VRT of several files, a GeoTIFF when GDAL_NUM_THREADS is
+        // set in the environment) and reach the limit after a fraction of the time the request
+        // has, with no more work done. A build has a limit for the threads of its request and
+        // gives GDAL those (raster::BuildThreads).
+        template <typename Run> Operation onOneGdalThread(Run run)
+        {
+            return [run] {
+                const ScopedThreadConfigOption oneThread("GDAL_NUM_THREADS", "1");
+                return run();
+            };
+        }
+
         // The operation the request names, ready to run. It refuses at once what cannot run in
         // this mode whatever the files are, so that a request that does nothing is answered
         // before anything is done for it (confining the process included).
         Operation operationOf(const Request &request, const raster::ProgressCallback *progress)
         {
             if (request.op == raster::op::kProbe)
-                return [&request] { return probe(request); };
+                return onOneGdalThread([&request] { return probe(request); });
             if (request.op == raster::op::kThumbnail)
-                return [&request] { return thumbnail(request); };
+                return onOneGdalThread([&request] { return thumbnail(request); });
             if (request.op == raster::op::kNormalize)
-                return [&request] { return normalize(request); };
+                return onOneGdalThread([&request] { return normalize(request); });
             if (request.op == raster::op::kGeoproject)
-                return [&request] { return geoproject(request); };
+                return onOneGdalThread([&request] { return geoproject(request); });
             if (request.op == raster::op::kCog || request.op == raster::op::kVector)
             {
                 // The builds take as long as they take: a process each, which the client waits for

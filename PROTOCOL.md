@@ -320,7 +320,10 @@ What a worker may do once confined (Linux; README.md has the details and the oth
   `probe` and `thumbnail`, 110 s for `normalize` and `geoproject`; `cog` and `vector` the run time
   of the client for each thread), address space (a share of the memory of the machine or its
   container), the size of a file written, open files, no core files. A limit the process already
-  has from its starter (`ulimit`, a container) is never raised.
+  has from its starter (`ulimit`, a container) is never raised. The cpu time of a process is that
+  of all its threads, so `probe`, `thumbnail`, `normalize` and `geoproject` run GDAL on one thread
+  (`GDAL_NUM_THREADS` 1, whatever the environment says): a format GDAL decodes on one thread per CPU
+  (JPEG 2000, a VRT of several files) would reach the limit after a fraction of the time.
 
 A worker that goes past a limit ends with `error: "limit"`: an allocation that fails in GDAL, a
 worker the system ends for its cpu time or the size of a file. A one-shot process ended that way
