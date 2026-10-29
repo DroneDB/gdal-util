@@ -7,7 +7,11 @@
 #include <optional>
 #include <string>
 
-#ifndef _WIN32
+#ifdef _WIN32
+#include <chrono>
+
+#include "cpu_watchdog.h"
+#else
 #include <cerrno>
 #include <csignal>
 #include <fcntl.h>
@@ -33,11 +37,40 @@ namespace gdalutil
         using raster::Response;
 
 #ifdef _WIN32
-        // Windows has no fork: the server runs the request itself
+        // Windows has no fork: the server runs the request itself. Its Job Object cannot bound the
+        // cpu time of one request (the time of a process is that of every request it served), so
+        // a watchdog does: past the limit of the operation, the same as a worker's on Linux, it
+        // answers the request with `limit` and ends the server, whose state a request that ran
+        // away may have left in any shape. The host starts a new server for the next request.
         class InProcessExecutor : public Executor
         {
           public:
-            Response execute(const Request &request) override { return handleRequest(request); }
+            InProcessExecutor(const Confinement &confinement, int responseFd)
+                : confinement_(confinement), responseFd_(responseFd)
+            {
+            }
+
+            Response execute(const Request &request) override
+            {
+                const int fd = responseFd_;
+                const int64_t id = request.id;
+                const auto limit = static_cast<std::chrono::seconds::rep>(confinement_.policyFor(request).maxCpuSeconds);
+                // Runs on the thread of the watchdog, which holds the request until the process
+                // ends: the server writes no response of its own after this one
+                watchdog_.arm(std::chrono::seconds(limit), [fd, id] {
+                    writeLine(fd, raster::encodeResponse(Response::failure(
+                                      id, ErrorCode::Limit, "the request used more cpu time than allowed")));
+                });
+                Response response = handleRequest(request);
+                watchdog_.disarm();
+                return response;
+            }
+
+          private:
+            const Confinement &confinement_;
+            const int responseFd_;
+            // Last: its thread ends before the members it may use go
+            CpuWatchdog watchdog_;
         };
 #else
         // The exit code of a worker that could not write its response
@@ -79,7 +112,8 @@ namespace gdalutil
 
         // The worker: handles the one request, writes the response to the pipe and ends without
         // running any exit handler (the state it inherited is not its own to clean up)
-        [[noreturn]] void runWorker(const Confinement &confinement, const Request &request, int pipeFd, pid_t serverPid)
+        [[noreturn]] void runWorker(const Confinement &confinement, const Request &request, int pipeFd, int responseFd,
+                                    pid_t serverPid)
         {
 #ifdef __linux__
             // A server that dies takes its worker along; the check closes the window between
@@ -95,6 +129,11 @@ namespace gdalutil
             if (devNull < 0 || dup2(devNull, STDIN_FILENO) < 0)
                 _exit(kWorkerFailed);
             close(devNull);
+            // Nor are the responses of the server its to write: what the worker keeps that leads
+            // to the host is standard error, which the host only logs. The rest of what the server
+            // inherited from the host was closed when the host started it
+            if (close(responseFd) != 0)
+                _exit(kWorkerFailed);
 
             try
             {
@@ -115,7 +154,10 @@ namespace gdalutil
         class ForkExecutor : public Executor
         {
           public:
-            explicit ForkExecutor(const Confinement &confinement) : confinement_(confinement) {}
+            ForkExecutor(const Confinement &confinement, int responseFd)
+                : confinement_(confinement), responseFd_(responseFd)
+            {
+            }
 
             Response execute(const Request &request) override
             {
@@ -144,7 +186,7 @@ namespace gdalutil
                 if (pid == 0)
                 {
                     close(fds[0]);
-                    runWorker(confinement_, request, fds[1], serverPid);
+                    runWorker(confinement_, request, fds[1], responseFd_, serverPid);
                 }
 
                 close(fds[1]);
@@ -167,6 +209,7 @@ namespace gdalutil
 
           private:
             const Confinement &confinement_;
+            const int responseFd_;
 
             // A worker that ended well wrote one complete response line for this request
             static Response verified(const Request &request, const std::string &output)
@@ -190,13 +233,12 @@ namespace gdalutil
 #endif
     } // namespace
 
-    std::unique_ptr<Executor> makePlatformExecutor(const Confinement &confinement)
+    std::unique_ptr<Executor> makePlatformExecutor(const Confinement &confinement, int responseFd)
     {
 #ifdef _WIN32
-        (void)confinement;
-        return std::make_unique<InProcessExecutor>();
+        return std::make_unique<InProcessExecutor>(confinement, responseFd);
 #else
-        return std::make_unique<ForkExecutor>(confinement);
+        return std::make_unique<ForkExecutor>(confinement, responseFd);
 #endif
     }
 } // namespace gdalutil

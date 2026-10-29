@@ -18,7 +18,9 @@ The protocol is described in [PROTOCOL.md](PROTOCOL.md).
 
 * `--serve` reads one request per line. On Linux and macOS it forks a worker for each request; the
   worker handles that one request, writes one response and ends, so nothing a file does to the
-  memory of a parser lives on to the next file. The server itself keeps no thread when it forks. On
+  memory of a parser lives on to the next file. The server itself keeps no thread when it forks. A
+  worker closes the server's copy of standard output first: what it keeps that leads to the host is
+  standard error, so a worker a file took over cannot write a line the host reads as a response. On
   Windows the server handles the requests itself.
 * The operations (`probe`, `thumbnail`, `normalize`, `geoproject`, `cog`, `vector`) are part of libddb (`src/library/raster_ops*.cpp` in the
   DroneDB repository); this program holds the modes, the server loop, the worker and the dispatch of
@@ -42,8 +44,9 @@ does it). `DDB_GDAL_SANDBOX` chooses what happens on a host that lacks a layer:
 
 The layers on Linux, in the order they are applied: resource limits (`rlimits`), `oom_score_adj`
 1000 so the host is not the process the kernel kills first (`oom-score`), `no_new_privs`, Landlock
-(`landlock`) and a seccomp filter (`seccomp`) that refuses sockets, `execve`, namespaces, `ptrace`
-and the signals to other processes. macOS has the resource limits. Windows has a Job Object and a
+(`landlock`) and a seccomp filter (`seccomp`) that refuses sockets, `execve`, a new process (a
+thread is allowed), leaving the process group, namespaces, `ptrace` and the signals to other
+processes. macOS has the resource limits. Windows has a Job Object and a
 low integrity level. `gdal-util --sandbox-report` prints the mode and each layer as `<name>:
 active|missing (<why>)` and exits 0.
 
@@ -59,7 +62,7 @@ What each request is allowed:
 | --- | --- |
 | Read | the folder of `path`; the folders of the `source` and `sidecar` params; the folder of the program, the libraries it loaded and the data files libddb ships (`proj.db`, `sensor_data.sqlite`, `timezone21.bin`, GDAL data); `GDAL_DATA`, `PROJ_DATA` and `PROJ_LIB`; the user directory of PROJ; `/proc/self`, `/dev/null`, `/dev/urandom`, `/etc/localtime`, `/usr/share/zoneinfo` |
 | Write | the folder `out` lies in (for `vector`, `out` itself), which the client made |
-| Never | network sockets, `execve`, namespaces, signals to other processes |
+| Never | network sockets, `execve`, a new process (`fork`, `vfork`, a `clone` that is not a thread), `setsid` and `setpgid`, namespaces, signals to other processes |
 
 | Operation | cpu time | address space | file written | open files |
 | --- | --- | --- | --- | --- |
@@ -79,9 +82,12 @@ worker that goes past a limit is answered with `limit`: the system ends it for i
 request with the same code. `PROJ_NETWORK` is off in the program, whatever the host says.
 
 On Windows the server runs the requests itself, so the Job Object limits the whole life of the
-process: memory, one active process, no access to the desktop, but no cpu time (the client's
-deadlines end a request that does not finish). Its low integrity level lets it write only in
-folders with a low integrity label, which the client sets on the folder of `out`.
+process: memory, one active process, no access to the desktop. The cpu time of one request is
+bounded by a thread of the server (`src/cpu_watchdog.cpp`) with the limits of the table: past
+them it answers the request with `limit` and ends the server with status 4, since a request that
+ran away may have left its state in any shape; the client starts another server. Its low
+integrity level lets it write only in folders with a low integrity label, which the client sets on
+the folder of `out`.
 
 ## Build
 

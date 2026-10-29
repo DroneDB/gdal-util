@@ -87,7 +87,7 @@ int main(int argc, char *argv[])
         const gdalutil::Confinement confinement;
         if (!startsConfined(confinement))
             return kSandboxRefused;
-        const auto executor = gdalutil::makePlatformExecutor(confinement);
+        const auto executor = gdalutil::makePlatformExecutor(confinement, runtime.responseFd());
         return gdalutil::serve(*executor, 0, runtime.responseFd());
     }
     if (argc == 3 && mode == "--request")

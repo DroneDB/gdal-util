@@ -15,6 +15,7 @@ endif()
 add_executable(gdal-util
     src/main.cpp
     src/confinement.cpp
+    src/cpu_watchdog.cpp
     src/dispatch.cpp
     src/executor.cpp
     src/fd_io.cpp

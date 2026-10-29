@@ -351,7 +351,7 @@ namespace gdalutil
     sandbox::Policy Confinement::serverPolicy() const
     {
         // The cpu time of a process is for its whole life, and the server lives for many
-        // requests: the clients' deadlines end a request that does not finish
+        // requests: the cpu time of each request is the watchdog's (executor.cpp)
         sandbox::Policy policy;
         applyMemoryLimit(policy, normalizeLimits(), memoryBytes_);
         return policy;

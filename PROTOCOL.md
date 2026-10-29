@@ -21,7 +21,8 @@ such a file: read it, never open a path or a URL in it.
 
 * A request or a response is one JSON object (RFC 8259), encoded as UTF-8, on one line that ends
   with a line feed (`\n`). A carriage return before the line feed is allowed in a request and
-  ignored.
+  ignored. Arrays and objects nest at most 64 deep (the outer object counts): a deeper line is not
+  valid, whichever side sends it.
 * The server answers every request line with exactly one response line, in the order of the
   requests, and flushes it. It handles one request at a time. A client may send several requests
   before it reads, as long as it keeps reading. An empty line is not a request and gets no answer.
@@ -34,8 +35,10 @@ such a file: read it, never open a path or a URL in it.
 * On POSIX systems the server handles each request in a worker, a child process that ends after the
   request. A worker that ends without a response (a signal, an exit code, running out of memory or
   cpu time) is answered with `error: "crashed"`, or `"limit"` when it was a limit that ended it
-  (cpu time, the size of a file, memory); the server keeps serving. On Windows the server handles
-  the requests itself. Every worker confines itself before it opens the file of its request
+  (cpu time, the size of a file, memory); the server keeps serving. A worker keeps nothing that
+  leads to the client but standard error: only the server writes to standard output. On Windows
+  the server handles the requests itself; a request that uses more cpu time than its operation
+  allows is answered with `error: "limit"` and the server then exits with status 4. Every worker confines itself before it opens the file of its request
   (section 9).
 
 ## 2. Command line
@@ -310,7 +313,8 @@ What a worker may do once confined (Linux; README.md has the details and the oth
   `/dev/urandom`, `/etc/localtime`, the time zone data). Nothing else.
 * **Write** in the folder `out` lies in (the folder `out` is, for `vector`), which the client made
   for the request and which must exist. Nothing else.
-* **Not** open a network socket, start a program, trace another process or signal another process.
+* **Not** open a network socket, start a program or another process (a thread is allowed), leave
+  its process group, trace another process or signal another process.
 * **Limits**, set for each request from its operation: cpu time below the client's wait (25 s for
   `probe` and `thumbnail`, 110 s for `normalize` and `geoproject`; `cog` and `vector` the run time
   of the client for each thread), address space (a share of the memory of the machine or its
@@ -322,7 +326,9 @@ worker the system ends for its cpu time or the size of a file. A one-shot proces
 writes no response; the client reads the signal (`SIGXCPU`, `SIGXFSZ`).
 
 On Windows the server runs the requests itself, in a Job Object (memory, one process, no access to
-the desktop) and at low integrity; it can write only in folders that carry a low integrity label,
+the desktop) and at low integrity, and a thread of the server watches the cpu time of each request:
+past the limit of its operation the request is answered with `error: "limit"` and the server exits
+with status 4 (a client starts another for the next request); it can write only in folders that carry a low integrity label,
 which the client puts on the folder of `out` when it makes it.
 
 `gdal-util --sandbox-report` is the check to run on a production host: every line must say `active`.
