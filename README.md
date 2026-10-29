@@ -52,7 +52,11 @@ The layers on Linux, in the order they are applied: resource limits (`rlimits`),
 thread is allowed), leaving the process group, namespaces, `ptrace` and the signals to other
 processes. macOS has the resource limits. Windows has a Job Object and a
 low integrity level. `gdal-util --sandbox-report` prints the mode and each layer as `<name>:
-active|missing (<why>)` and exits 0.
+active|missing (<why>)` and exits 0. A build with a sanitizer, which is for tests and never
+packaged, leaves out what the runtime cannot live with and says so in the detail of the layer:
+no address space limit (AddressSanitizer, ThreadSanitizer and MemorySanitizer take terabytes of
+it for their shadow memory), and LeakSanitizer's leak check at exit may make its one clone, use
+`ptrace` and read `/proc/self/task` ("Sanitizer builds" in `vendor/sandbox/README.md` of DroneDB).
 
 **Release check.** After installing a package, on the machine or in the container that will run
 it, `gdal-util --sandbox-report` must show every layer `active`. A line that says `missing` is a
