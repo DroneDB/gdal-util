@@ -56,9 +56,9 @@ Every request is an object:
 | Member | Type | Meaning |
 | --- | --- | --- |
 | `id` | integer | A signed 64-bit integer, echoed in the response. |
-| `op` | string | The operation: `probe`, `thumbnail`, `geoproject`, `cog` or `vector`. The operation `normalize` is reserved: this version answers it with `error: "internal"`. |
+| `op` | string | The operation: `probe`, `thumbnail`, `normalize`, `geoproject`, `cog` or `vector`. |
 | `path` | string | The file to read: an absolute path. See section 6 for `path64`. |
-| `out` | string | The file to write (a folder, for `vector`), an absolute path, for the operations that write (`thumbnail`, `geoproject`, `cog`, `vector`). The folder it lies in exists and is the only place the operation writes to (for `cog`, a scratch file or two of GDAL and the statistics beside the COG). See section 6 for `out64`. |
+| `out` | string | The file to write (a folder, for `vector`), an absolute path, for the operations that write (`thumbnail`, `normalize`, `geoproject`, `cog`, `vector`). The folder it lies in exists and is the only place the operation writes to (for `cog`, a scratch file or two of GDAL and the statistics beside the COG). See section 6 for `out64`. |
 | `params` | object | The members the operation defines. A missing `params` is an empty object. |
 
 Members a request does not define are ignored, so that later minor versions can add optional
@@ -185,6 +185,32 @@ coordinate system has no tiles: it gets `vec/local.json` (units and extent) inst
 
 The result is `{}`. A file that GDAL cannot open as a vector is `error: "unreadable"`.
 
+### 3.6 `normalize`
+
+```json
+{"id":12,"op":"normalize","path":"/data/ds/DJI_0001_R.JPG","out":"/cache/artefacts/req-normalize-x/normalized.tif","params":{}}
+```
+
+Writes a raster as a GeoTIFF with a lossless compression (DEFLATE), so a client reads the copy
+and never the file of the user: this is how the analyses of a raster that is not a build output of
+a dataset (a photo, a GeoTIFF of an upload) get their pixels and their metadata. The copy has the
+blocks of the raster (stripes of the same height, or tiles of the same size; 256 when TIFF cannot
+write that tile size) and its overviews, the data of those the raster offers (a JPEG decoded at a
+smaller scale, the overviews of a TIFF), because the approximate statistics of GDAL read an
+overview or sample whole blocks: other ones would give other statistics for the same raster. The
+copy keeps all bands with their data types, no-data values, colour interpretation, descriptions,
+units, offsets and scales; the georeferencing (geotransform and coordinate system, or the ground
+control points; the RPC); and the metadata of the dataset and of each band in every domain, except
+`IMAGE_STRUCTURE` (it describes how the source is stored) and the domains that name other
+datasets: `SUBDATASETS`, `DERIVED_SUBDATASETS`, `OVERVIEWS` and `GEOLOCATION`. Every value of the
+copy is the value of the raster. The sidecar files of the raster are not copied. The
+operation has no params. Only rasters are normalized: the vector queries of a client read the
+GeoPackage that the `vector` operation wrote.
+
+The result is `{}`. A file that GDAL cannot open as a raster is `error: "unreadable"`. A raster of
+more than 1 000 000 000 pixels (width times height) is `error: "limit"`, with a message that says
+to build the dataset first; the request writes nothing then. A full device is `error: "nospace"`.
+
 ## 4. Responses
 
 A success: `{"id": <id>, "ok": true, "result": {...}}`. A failure:
@@ -212,7 +238,8 @@ with an `id` it did not ask for as a broken program.
 | Request line, response line | 16 MiB |
 | `message` of a failure | 2000 bytes |
 | Wall time of `probe` and `thumbnail` | 30 s (the client's timeout) |
-| Wall time of `geoproject` | 120 s (the client's timeout) |
+| Wall time of `normalize` and `geoproject` | 120 s (the client's timeout) |
+| Pixels of a raster to `normalize` | 1 000 000 000 (width times height) |
 | Time of `cog` and `vector` | no limit of the protocol: the client ends the process after an idle time without a line, or at its maximum run time |
 
 ## 6. Text that is not UTF-8

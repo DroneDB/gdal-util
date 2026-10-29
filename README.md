@@ -20,7 +20,7 @@ The protocol is described in [PROTOCOL.md](PROTOCOL.md).
   worker handles that one request, writes one response and ends, so nothing a file does to the
   memory of a parser lives on to the next file. The server itself keeps no thread when it forks. On
   Windows the server handles the requests itself.
-* The operations (`probe`, `thumbnail`) are part of libddb (`src/library/raster_ops*.cpp` in the
+* The operations (`probe`, `thumbnail`, `normalize`, `geoproject`, `cog`, `vector`) are part of libddb (`src/library/raster_ops*.cpp` in the
   DroneDB repository); this program holds the modes, the server loop, the worker and the dispatch of
   a request to its operation. The program contains the library (it does not load `libddb`), and the
   only place that allows the opening of user files is this program's `main`.

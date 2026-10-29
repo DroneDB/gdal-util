@@ -63,6 +63,12 @@ namespace gdalutil
             return json::object();
         }
 
+        json normalize(const Request &request)
+        {
+            raster::normalizeRaster(requiredPath(request.path, "path"), requiredPath(request.out, "out"));
+            return json::object();
+        }
+
         json geoproject(const Request &request)
         {
             const auto params = raster::geoprojectParamsFromJson(request.params);
@@ -76,6 +82,8 @@ namespace gdalutil
                 return probe(request);
             if (request.op == raster::op::kThumbnail)
                 return thumbnail(request);
+            if (request.op == raster::op::kNormalize)
+                return normalize(request);
             if (request.op == raster::op::kGeoproject)
                 return geoproject(request);
             if (request.op == raster::op::kCog || request.op == raster::op::kVector)
@@ -86,8 +94,6 @@ namespace gdalutil
                     throw raster::ProtocolError("the operation '" + request.op + "' runs only with --request");
                 return request.op == raster::op::kCog ? cog(request, *progress) : buildVector(request);
             }
-            if (request.op == raster::op::kNormalize)
-                throw raster::ProtocolError("the operation '" + request.op + "' is not available in this version");
             throw raster::ProtocolError("unknown operation '" + request.op + "'");
         }
     } // namespace
