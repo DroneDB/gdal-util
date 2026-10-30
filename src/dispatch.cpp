@@ -213,9 +213,13 @@ namespace gdalutil
                 Request thumbnail{--id, raster::op::kThumbnail, file, folder.path() / "warm-up.webp",
                                   {{"size", 256}}};
                 for (const Request &request : {probe, thumbnail})
+                {
                     if (const Response response = handleRequest(request); !response.ok)
+                    {
                         LOGD << "The warm-up " << request.op << " of " << file.filename()
                              << " failed: " << response.message;
+                    }
+                }
             }
         }
         catch (const std::exception &e)
