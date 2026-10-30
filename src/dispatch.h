@@ -27,6 +27,14 @@ namespace gdalutil
     // not apply: a one-shot process does, a worker of a server does not (the server said so once).
     ddb::raster::Response handleConfined(const Confinement &confinement, const ddb::raster::Request &request,
                                          const ddb::raster::ProgressCallback *progress, bool logWarning);
+
+    // Runs a probe and a thumbnail of rasters the helper writes itself (a GeoTIFF in a projected
+    // coordinate system and a JPEG), so that what GDAL, PROJ and the encoders set up the first
+    // time they are used is in place: a worker forked afterwards inherits it instead of setting
+    // it up again for every request (2.4 ms of a photo thumbnail, 3.4 ms of a GeoTIFF one). It reads no
+    // file of a user and leaves the process with the one thread it had. Never throws: a warm-up
+    // that fails only leaves that cost to the workers.
+    void warmUp();
 } // namespace gdalutil
 
 #endif

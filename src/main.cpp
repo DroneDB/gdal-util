@@ -13,6 +13,7 @@
 #include <string>
 
 #include "confinement.h"
+#include "dispatch.h"
 #include "executor.h"
 #include "logger.h"
 #include "raster_protocol.h"
@@ -89,6 +90,11 @@ int main(int argc, char *argv[])
         const gdalutil::Confinement confinement;
         if (!startsConfined(confinement))
             return kSandboxRefused;
+#ifndef _WIN32
+        // Every request runs in a worker forked from this process: what GDAL and PROJ set up on
+        // first use is set up here once, for all of them
+        gdalutil::warmUp();
+#endif
         const auto executor = gdalutil::makePlatformExecutor(confinement, runtime.responseFd());
         return gdalutil::serve(*executor, 0, runtime.responseFd());
     }

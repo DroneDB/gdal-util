@@ -9,7 +9,10 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <utility>
+#include <vector>
 
+#include "gdal_inc.h"
 #include "gdal_raii.h"
 #include "logger.h"
 #include "memory_watch.h"
@@ -155,7 +158,72 @@ namespace gdalutil
                 return Response::failure(request.id, ErrorCode::Internal, "unknown failure");
             }
         }
+
+        // The rasters of the warm-up, which the helper writes itself: a small 3-band GeoTIFF in a
+        // projected coordinate system (the orthophotos and DEMs of datasets) and a JPEG of the
+        // same pixels (the photos)
+        std::vector<fs::path> writeWarmUpRasters(const fs::path &folder)
+        {
+            constexpr int kSize = 64;
+            GDALDriverH mem = GDALGetDriverByName("MEM");
+            if (mem == nullptr)
+                throw std::runtime_error("GDAL has no MEM driver");
+            const GDALDatasetUniquePtr pixels = adoptDataset(GDALCreate(mem, "", kSize, kSize, 3, GDT_Byte, nullptr));
+            if (!pixels)
+                throw std::runtime_error("cannot create the pixels of the warm-up");
+            std::vector<unsigned char> row(kSize);
+            for (int band = 1; band <= 3; band++)
+                for (int y = 0; y < kSize; y++)
+                {
+                    for (int x = 0; x < kSize; x++)
+                        row[x] = static_cast<unsigned char>((x * 3 + y * 5 + band * 40) % 256);
+                    if (GDALRasterIO(GDALGetRasterBand(datasetHandle(pixels), band), GF_Write, 0, y, kSize, 1,
+                                     row.data(), kSize, 1, GDT_Byte, 0, 0) != CE_None)
+                        throw std::runtime_error("cannot write the pixels of the warm-up");
+                }
+            double geotransform[6] = {500000.0, 0.05, 0.0, 5000000.0, 0.0, -0.05};
+            GDALSetGeoTransform(datasetHandle(pixels), geotransform);
+            const SrsPtr utm(OSRNewSpatialReference(nullptr));
+            if (OSRImportFromEPSG(utm.get(), 32632) == OGRERR_NONE)
+                GDALSetSpatialRef(datasetHandle(pixels), utm.get());
+
+            std::vector<fs::path> files;
+            for (const auto &[driver, name] : {std::pair{"GTiff", "warm-up.tif"}, std::pair{"JPEG", "warm-up.jpg"}})
+            {
+                const fs::path path = folder / name;
+                GDALDatasetUniquePtr copy = adoptDataset(GDALCreateCopy(GDALGetDriverByName(driver), io::toUtf8(path).c_str(),
+                                                                        datasetHandle(pixels), FALSE, nullptr, nullptr, nullptr));
+                if (copy && closeDataset(std::move(copy)) == CE_None)
+                    files.push_back(path);
+            }
+            return files;
+        }
     } // namespace
+
+    void warmUp()
+    {
+        try
+        {
+            const io::ScopedTempDir folder =
+                io::ScopedTempDir::create(fs::temp_directory_path(), "gdal-util-warm-up-");
+            int64_t id = 0;
+            for (const fs::path &file : writeWarmUpRasters(folder.path()))
+            {
+                Request probe{--id, raster::op::kProbe, file, {}, raster::toJson(raster::ProbeParams{})};
+                Request thumbnail{--id, raster::op::kThumbnail, file, folder.path() / "warm-up.webp",
+                                  {{"size", 256}}};
+                for (const Request &request : {probe, thumbnail})
+                    if (const Response response = handleRequest(request); !response.ok)
+                        LOGD << "The warm-up " << request.op << " of " << file.filename()
+                             << " failed: " << response.message;
+            }
+        }
+        catch (const std::exception &e)
+        {
+            // Each worker then sets GDAL and PROJ up again, as it did before the warm-up
+            LOGD << "No warm-up: " << e.what();
+        }
+    }
 
     Response handleConfined(const Confinement &confinement, const Request &request,
                             const raster::ProgressCallback *progress, bool logWarning)
