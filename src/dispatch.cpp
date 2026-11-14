@@ -64,6 +64,15 @@ namespace gdalutil
             return json::object();
         }
 
+        json copc(const Request &request, const raster::ProgressCallback &progress)
+        {
+            const auto params = raster::copcParamsFromJson(request.params);
+            for (const fs::path &input : params.inputs)
+                requiredPath(input, "input");
+            raster::buildCopcFile(requiredPath(request.path, "path"), requiredPath(request.out, "out"), params, progress);
+            return json::object();
+        }
+
         json buildVector(const Request &request)
         {
             const auto params = raster::vectorParamsFromJson(request.params);
@@ -114,7 +123,7 @@ namespace gdalutil
                 return onOneGdalThread([&request] { return normalize(request); });
             if (request.op == raster::op::kGeoproject)
                 return onOneGdalThread([&request] { return geoproject(request); });
-            if (request.op == raster::op::kCog || request.op == raster::op::kVector)
+            if (request.op == raster::op::kCog || request.op == raster::op::kCopc || request.op == raster::op::kVector)
             {
                 // The builds take as long as they take: a process each, which the client waits for
                 // without a deadline of its own (PROTOCOL.md)
@@ -122,6 +131,8 @@ namespace gdalutil
                     throw raster::ProtocolError("the operation '" + request.op + "' runs only with --request");
                 if (request.op == raster::op::kCog)
                     return [&request, progress] { return cog(request, *progress); };
+                if (request.op == raster::op::kCopc)
+                    return [&request, progress] { return copc(request, *progress); };
                 return [&request] { return buildVector(request); };
             }
             throw raster::ProtocolError("unknown operation '" + request.op + "'");

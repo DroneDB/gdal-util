@@ -8,7 +8,9 @@
 #include <cstdint>
 #include <fstream>
 #include <optional>
+#include <system_error>
 #include <thread>
+#include <vector>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -119,7 +121,7 @@ namespace gdalutil
                 return thumbnailLimits();
             if (request.op == op::kGeoproject)
                 return geoprojectLimits();
-            if (request.op == op::kCog || request.op == op::kVector)
+            if (request.op == op::kCog || request.op == op::kCopc || request.op == op::kVector)
             {
                 const auto threads = tolerant([&] { return raster::buildThreadsFromJson(request.params); });
                 return buildLimits(std::max<uint64_t>(hardwareThreads(), static_cast<uint64_t>(std::max(0, threads.value_or(0)))));
@@ -307,6 +309,41 @@ namespace gdalutil
                 if (!params.source.empty())
                     add(paths, folderOf(params.source));
             }
+            // The point clouds merged with `path`
+            else if (request.op == op::kCopc)
+            {
+                const auto params = tolerant([&] { return raster::copcParamsFromJson(request.params); });
+                for (const fs::path &input : params.inputs)
+                    add(paths, folderOf(input));
+            }
+        }
+
+        // The address space the files of a request take when they are mapped whole: the COPC
+        // builder maps the point clouds it parses in place (PLY, E57, XYZ, PTS), and a mapping of
+        // a file counts in the address space of a process as much as memory does, although its
+        // pages are the file's. Without it a cloud of a few GB fails its build on a machine whose
+        // memory share is not much larger. Windows bounds the memory a process commits, which a
+        // mapping of a file does not take: nothing there.
+        uint64_t mappedInputBytes(const raster::Request &request)
+        {
+#ifdef _WIN32
+            (void)request;
+            return 0;
+#else
+            if (request.op != op::kCopc)
+                return 0;
+            std::vector<fs::path> files = tolerant([&] { return raster::copcParamsFromJson(request.params); }).inputs;
+            files.push_back(request.path);
+            uint64_t bytes = 0;
+            for (const fs::path &file : files)
+            {
+                std::error_code ec;
+                const auto size = fs::file_size(file, ec);
+                if (!ec)
+                    bytes += static_cast<uint64_t>(size);
+            }
+            return bytes;
+#endif
         }
 
         // The folder the operation writes in: the one the client made for the file it asks for,
@@ -340,6 +377,7 @@ namespace gdalutil
 
         const Limits limits = limitsFor(request);
         applyMemoryLimit(policy, limits, memoryBytes_);
+        policy.maxMemoryBytes += mappedInputBytes(request);
         policy.maxCpuSeconds = limits.cpuSeconds;
         policy.maxFileBytes = limits.fileBytes;
         policy.maxOpenFiles = limits.openFiles;

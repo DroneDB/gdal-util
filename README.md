@@ -28,13 +28,13 @@ The protocol is described in [PROTOCOL.md](PROTOCOL.md).
   again: the warm-up takes 2.4 ms off a photo thumbnail and 3.4 ms off that of a GeoTIFF. The
   warm-up reads no file of a user and leaves the server with its one thread. PROJ reopens its
   database in a forked child by itself.
-* The operations (`probe`, `thumbnail`, `normalize`, `geoproject`, `cog`, `vector`) are part of libddb (`src/library/raster_ops*.cpp` in the
+* The operations (`probe`, `thumbnail`, `normalize`, `geoproject`, `cog`, `copc`, `vector`) are part of libddb (`src/library/raster_ops*.cpp` in the
   DroneDB repository); this program holds the modes, the server loop, the worker and the dispatch of
   a request to its operation. The program contains the library (it does not load `libddb`), and the
   only place that allows the opening of user files is this program's `main`.
 * The host bounds the heap of glibc's allocator by the environment it starts the program with:
   `MALLOC_ARENA_MAX=2` for `--serve` (one thread a worker, many workers), and one arena per thread
-  of the build plus one for the `--request` of `cog` and `vector`, whose threads would otherwise
+  of the build plus one for the `--request` of `cog`, `copc` and `vector`, whose threads would otherwise
   wait on the locks of two arenas (PROTOCOL.md section 9).
 * Standard output carries the responses and nothing else: the program keeps a private copy of it for
   the responses and points standard output at standard error, so a library that prints cannot
@@ -74,7 +74,7 @@ What each request is allowed:
 
 | | |
 | --- | --- |
-| Read | the folder of `path`; the folders of the `source` and `sidecar` params; the folder of the program, the libraries it loaded and the data files libddb ships (`proj.db`, `sensor_data.sqlite`, `timezone21.bin`, GDAL data); `GDAL_DATA`, `PROJ_DATA` and `PROJ_LIB`; the user directory of PROJ; `/proc/self`, `/dev/null`, `/dev/urandom`, `/etc/localtime`, `/usr/share/zoneinfo` |
+| Read | the folder of `path`; the folders of the `source` and `sidecar` params and of the `inputs` of `copc`; the folder of the program, the libraries it loaded and the data files libddb ships (`proj.db`, `sensor_data.sqlite`, `timezone21.bin`, GDAL data); `GDAL_DATA`, `PROJ_DATA` and `PROJ_LIB`; the user directory of PROJ; `/proc/self`, `/dev/null`, `/dev/urandom`, `/etc/localtime`, `/usr/share/zoneinfo` |
 | Write | the folder `out` lies in (for `vector`, `out` itself), which the client made |
 | Never | network sockets, `execve`, a new process (`fork`, `vfork`, a `clone` that is not a thread), `setsid` and `setpgid`, namespaces, signals to other processes |
 
@@ -84,7 +84,7 @@ What each request is allowed:
 | `thumbnail` | 25 s | 1/4, at least 2 GiB | 64 MiB | 256 |
 | `normalize` | 110 s | 1/2, at least 4 GiB | 128 GiB | 1024 |
 | `geoproject` | 110 s | 1/2, at least 4 GiB | 16 GiB | 1024 |
-| `cog`, `vector` | `DDB_GDAL_UTIL_MAX_SECONDS` (12 h) for each thread the machine has | 3/4, at least 4 GiB | 1 TiB (a runaway file) | 4096 |
+| `cog`, `copc`, `vector` | `DDB_GDAL_UTIL_MAX_SECONDS` (12 h) for each thread the machine has | 3/4, at least 4 GiB (`copc`: plus the size of its point clouds, which the builder maps whole; not on Windows, where a mapped file takes no committed memory) | 1 TiB (a runaway file) | 4096 |
 
 The cpu time of the first four ends a little before the client's 30 s and 120 s, so the answer is
 `limit` and not a worker the client killed. The memory is that of the machine, or of its control

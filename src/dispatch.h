@@ -13,7 +13,7 @@ namespace gdalutil
     // a failure is a response with the code that tells the host what to do with it
     // (ddb::raster::classify).
     //
-    // `progress` is where a long operation (cog, vector, geoproject) reports how far it is. The
+    // `progress` is where a long operation (cog, copc, vector, geoproject) reports how far it is. The
     // request of `--request` has one; a request of `--serve` has none and is refused for these
     // operations: the long ones run in a process of their own, for as long as they take.
     ddb::raster::Response handleRequest(const ddb::raster::Request &request,
