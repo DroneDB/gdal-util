@@ -47,7 +47,7 @@ such a file: read it, never open a path or a URL in it.
 | --- | --- |
 | `gdal-util --version` | Prints one line, `gdal-util <version> protocol <major>.<minor>`, and exits 0. `<version>` is the version of the DroneDB build that contains the program. Nothing else is initialised. |
 | `gdal-util --serve` | Serves the requests of this document on standard input and output. File paths are never taken from the command line in this mode. In the sandbox mode `strict` it exits with status 3 and a message that names the missing layer, without serving, when this host lacks a layer (section 9). |
-| `gdal-util --request '<json>'` | Handles the one request given as the argument, in this process, writes its response line to standard output and exits 0 when the response is a success and 1 when it is a failure. An operation that runs long (`cog`, `copc`) writes progress lines before the response, each a line of its own: `{"progress":<number>}`, the fraction done from 0 to 1, rising. The operations `cog`, `copc` and `vector` run only in this mode. The client writes the argument in ASCII, every other character as a `\uXXXX` escape of JSON: Windows passes a command line to a program in its ANSI code page, which changes the bytes of UTF-8 text. |
+| `gdal-util --request '<json>'` | Handles the one request given as the argument, in this process, writes its response line to standard output and exits 0 when the response is a success and 1 when it is a failure. An operation that runs long (`cog`, `copc`) writes progress lines before the response, each a line of its own: `{"progress":<number>}`, the fraction done from 0 to 1, rising. The operations `cog`, `copc`, `vector` and `geoproject` run only in this mode. The client writes the argument in ASCII, every other character as a `\uXXXX` escape of JSON: Windows passes a command line to a program in its ANSI code page, which changes the bytes of UTF-8 text. |
 | `gdal-util --sandbox-report` | Prints the sandbox mode and, one line per layer, whether this host offers it (section 9), and exits 0 whatever is missing. |
 | anything else | Prints a usage line to standard error and exits 2. |
 
@@ -150,8 +150,10 @@ decoded from the preview.
 {"id":9,"op":"geoproject","path":"/data/ds/photo.jpg","out":"/tmp/ddb/req-2/geoprojected.tif","params":{"width":4000,"height":3000,"footprint":[[9.1,45.3],[9.1,45.2],[9.2,45.2],[9.2,45.3]],"outsize":"100%"}}
 ```
 
-Places a photo on the ground and writes it to `out` as a GeoTIFF (JPEG compressed, with an alpha
-band). The helper reads no EXIF: the client says where the photo is.
+Places a photo on the ground and writes it to `out` as a GeoTIFF in EPSG:4326 (a COG: JPEG with
+the footprint in a mask for 8-bit RGB, LZW with an alpha band otherwise), built with the threads
+of the machine like `cog`; it runs only one-shot (`--request`). The helper reads no EXIF: the
+client says where the photo is.
 
 | `params` member | Type | Meaning |
 | --- | --- | --- |
@@ -159,8 +161,8 @@ band). The helper reads no EXIF: the client says where the photo is.
 | `footprint` | array | The ground position of the four corners of the photo, each `[longitude, latitude]` in EPSG:4326, in the order upper left, lower left, lower right, upper right. Required. |
 | `outsize` | string | The size of the result as `gdal_translate -outsize` takes it: `"100%"`, or a number of pixels of width. Default: as the photo. |
 
-The result is `{}`. A file that GDAL cannot open as a raster is `error: "unreadable"`. An `outsize`
-that is not a positive number is `error: "internal"`.
+The result is `{}`. A photo the builder cannot read is `error: "unreadable"`. An `outsize` that is
+not a positive number is `error: "internal"`.
 
 ### 3.4 `cog`
 
@@ -273,9 +275,9 @@ with an `id` it did not ask for as a broken program.
 | Request line, response line | 16 MiB |
 | `message` of a failure | 2000 bytes |
 | Wall time of `probe` and `thumbnail` | 30 s (the client's timeout) |
-| Wall time of `normalize` and `geoproject` | 120 s (the client's timeout) |
+| Wall time of `normalize` | 120 s (the client's timeout) |
 | Pixels of a raster to `normalize` | 1 000 000 000 (width times height) |
-| Time of `cog`, `copc` and `vector` | no limit of the protocol: the client ends the process after an idle time without a line, or at its maximum run time |
+| Time of `cog`, `copc`, `vector` and `geoproject` | no limit of the protocol: the client ends the process after an idle time without a line, or at its maximum run time |
 | Cpu time, memory, file size and open files of a worker | by operation, section 9 |
 
 ## 6. Text that is not UTF-8
@@ -338,11 +340,11 @@ What a worker may do once confined (Linux; README.md has the details and the oth
 * **Not** open a network socket, start a program or another process (a thread is allowed), leave
   its process group, trace another process or signal another process.
 * **Limits**, set for each request from its operation: cpu time below the client's wait (25 s for
-  `probe` and `thumbnail`, 110 s for `normalize` and `geoproject`; `cog`, `copc` and `vector` the run time
+  `probe` and `thumbnail`, 110 s for `normalize`; `cog`, `copc`, `vector` and `geoproject` the run time
   of the client for each thread), address space (a share of the memory of the machine or its
   container; for `copc` plus the size of its point clouds, which the builder maps whole), the size of a file written, open files, no core files. A limit the process already
   has from its starter (`ulimit`, a container) is never raised. The cpu time of a process is that
-  of all its threads, so `probe`, `thumbnail`, `normalize` and `geoproject` run GDAL on one thread
+  of all its threads, so `probe`, `thumbnail` and `normalize` run GDAL on one thread
   (`GDAL_NUM_THREADS` 1, whatever the environment says): a format GDAL decodes on one thread per CPU
   (JPEG 2000, a VRT of several files) would reach the limit after a fraction of the time.
 

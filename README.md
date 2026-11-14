@@ -83,10 +83,9 @@ What each request is allowed:
 | `probe` | 25 s | 1/4 of the memory, at least 2 GiB | 16 MiB | 256 |
 | `thumbnail` | 25 s | 1/4, at least 2 GiB | 64 MiB | 256 |
 | `normalize` | 110 s | 1/2, at least 4 GiB | 128 GiB | 1024 |
-| `geoproject` | 110 s | 1/2, at least 4 GiB | 16 GiB | 1024 |
-| `cog`, `copc`, `vector` | `DDB_GDAL_UTIL_MAX_SECONDS` (12 h) for each thread the machine has | 3/4, at least 4 GiB (`copc`: plus the size of its point clouds, which the builder maps whole; not on Windows, where a mapped file takes no committed memory) | 1 TiB (a runaway file) | 4096 |
+| `cog`, `copc`, `vector`, `geoproject` | `DDB_GDAL_UTIL_MAX_SECONDS` (12 h) for each thread the machine has | 3/4, at least 4 GiB (`copc`: plus the size of its point clouds, which the builder maps whole; not on Windows, where a mapped file takes no committed memory) | 1 TiB (a runaway file) | 4096 |
 
-The cpu time of the first four ends a little before the client's 30 s and 120 s, so the answer is
+The cpu time of the first three ends a little before the client's 30 s and 120 s, so the answer is
 `limit` and not a worker the client killed. The memory is that of the machine, or of its control
 group in a container, whichever is less; the limit counts what is mapped (libraries and stacks
 too), not only what is used. None of these can be raised past what the process already has: an

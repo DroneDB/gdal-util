@@ -76,13 +76,7 @@ namespace gdalutil
             return {static_cast<uint64_t>((raster::kConversionTimeout - kConversionCpuMargin).count()), 1, 2, 4 * kGiB,
                     128 * kGiB, 1024};
         }
-        Limits geoprojectLimits()
-        {
-            Limits limits = normalizeLimits();
-            limits.fileBytes = 16 * kGiB;
-            return limits;
-        }
-        // cog and vector run as long as the build takes (the client ends them at its maximum run
+        // cog, copc, vector and geoproject run as long as the build takes (the client ends them at its maximum run
         // time) and use several threads: the cpu time of a process is the sum of its threads. The
         // size of a file is bounded only to stop a runaway one.
         Limits buildLimits(uint64_t threads)
@@ -119,9 +113,8 @@ namespace gdalutil
                 return probeLimits();
             if (request.op == op::kThumbnail)
                 return thumbnailLimits();
-            if (request.op == op::kGeoproject)
-                return geoprojectLimits();
-            if (request.op == op::kCog || request.op == op::kCopc || request.op == op::kVector)
+            if (request.op == op::kCog || request.op == op::kCopc || request.op == op::kVector ||
+                request.op == op::kGeoproject)
             {
                 const auto threads = tolerant([&] { return raster::buildThreadsFromJson(request.params); });
                 return buildLimits(std::max<uint64_t>(hardwareThreads(), static_cast<uint64_t>(std::max(0, threads.value_or(0)))));

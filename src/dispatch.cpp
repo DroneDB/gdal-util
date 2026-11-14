@@ -121,9 +121,8 @@ namespace gdalutil
                 return onOneGdalThread([&request] { return thumbnail(request); });
             if (request.op == raster::op::kNormalize)
                 return onOneGdalThread([&request] { return normalize(request); });
-            if (request.op == raster::op::kGeoproject)
-                return onOneGdalThread([&request] { return geoproject(request); });
-            if (request.op == raster::op::kCog || request.op == raster::op::kCopc || request.op == raster::op::kVector)
+            if (request.op == raster::op::kCog || request.op == raster::op::kCopc || request.op == raster::op::kVector ||
+                request.op == raster::op::kGeoproject)
             {
                 // The builds take as long as they take: a process each, which the client waits for
                 // without a deadline of its own (PROTOCOL.md)
@@ -133,6 +132,8 @@ namespace gdalutil
                     return [&request, progress] { return cog(request, *progress); };
                 if (request.op == raster::op::kCopc)
                     return [&request, progress] { return copc(request, *progress); };
+                if (request.op == raster::op::kGeoproject)
+                    return [&request] { return geoproject(request); };
                 return [&request] { return buildVector(request); };
             }
             throw raster::ProtocolError("unknown operation '" + request.op + "'");
