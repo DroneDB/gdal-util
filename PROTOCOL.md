@@ -276,6 +276,28 @@ params.
 
 A file that is not a point cloud of those formats, or that cannot be read, is `error: "unreadable"`.
 
+### 3.9 `sampleCloud` (1.2)
+
+```json
+{"id":14,"op":"sampleCloud","path":"/data/odm/odm_georeferencing/odm_georeferenced_model.laz","out":"/data/train/ddb-cloud-sample-x/sample.bin","params":{"shift":[576000.0,5188000.0,0.0],"limit":200000}}
+```
+
+Writes a sample of a point cloud (LAS, LAZ, PLY, E57, XYZ or PTS) to `out`: its points, in the order
+of the file, shifted by minus `shift` and thinned on a 3D grid to at most `limit` (the first point of
+a cell stays; the cell grows while more cells than `limit` are left). The file is
+`DDBCLOUDSAMPLE1` and a NUL byte, the number of points (unsigned 64-bit), then each point as `x`, `y`,
+`z` (64-bit floats) and `red`, `green`, `blue` (unsigned 16-bit: LAS as stored, 8-bit colours
+multiplied by 257, zero without colours), all little-endian. Runs only with `--request`, which
+writes progress lines as it reads the points.
+
+| `params` member | Type | Meaning |
+| --- | --- | --- |
+| `shift` | array | Three numbers subtracted from the coordinates of every point. Required. |
+| `limit` | number | The most points of the sample (0: none). Required. |
+
+The result is `{}`. A file that is not a point cloud of those formats, or that cannot be read, is
+`error: "unreadable"`.
+
 ## 4. Responses
 
 A success: `{"id": <id>, "ok": true, "result": {...}}`. A failure:

@@ -17,6 +17,7 @@
 #include "logger.h"
 #include "memory_watch.h"
 #include "mio.h"
+#include "cloud_sample.h"
 #include "pointcloud.h"
 #include "raster_ops.h"
 
@@ -67,6 +68,14 @@ namespace gdalutil
         {
             const auto params = raster::cogParamsFromJson(request.params);
             raster::buildCogFile(requiredPath(request.path, "path"), requiredPath(request.out, "out"), params, progress);
+            return json::object();
+        }
+
+        json sampleCloud(const Request &request, const raster::ProgressCallback &progress)
+        {
+            const auto params = raster::cloudSampleParamsFromJson(request.params);
+            writeCloudSample(requiredPath(request.out, "out"),
+                             sampleCloudFile(requiredPath(request.path, "path"), params, progress));
             return json::object();
         }
 
@@ -130,7 +139,7 @@ namespace gdalutil
             if (request.op == raster::op::kNormalize)
                 return onOneGdalThread([&request] { return normalize(request); });
             if (request.op == raster::op::kCog || request.op == raster::op::kCopc || request.op == raster::op::kVector ||
-                request.op == raster::op::kGeoproject)
+                request.op == raster::op::kGeoproject || request.op == raster::op::kSampleCloud)
             {
                 // The builds take as long as they take: a process each, which the client waits for
                 // without a deadline of its own (PROTOCOL.md)
@@ -142,6 +151,8 @@ namespace gdalutil
                     return [&request, progress] { return copc(request, *progress); };
                 if (request.op == raster::op::kGeoproject)
                     return [&request] { return geoproject(request); };
+                if (request.op == raster::op::kSampleCloud)
+                    return [&request, progress] { return sampleCloud(request, *progress); };
                 return [&request] { return buildVector(request); };
             }
             throw raster::ProtocolError("unknown operation '" + request.op + "'");
