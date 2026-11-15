@@ -1,9 +1,11 @@
 # gdal-util
 
-`gdal-util` reads the files that users supply (rasters, vectors, photos) with GDAL, in its own
-process, for [DroneDB](https://github.com/DroneDB/DroneDB). A file can be damaged or hostile: a
-crash, a hang or a memory bomb in a parser ends a worker of this program, not the application that
-loads libddb. DroneDB runs it as a child process and talks to it over a line-based JSON protocol.
+`gdal-util` is the sandboxed helper of [DroneDB](https://github.com/DroneDB/DroneDB): it opens the
+files that users supply (rasters, vectors, photos, point clouds) in its own process, reads what
+DroneDB needs from them, and builds the COG and COPC files that DroneDB serves. A file can be
+damaged or hostile: a crash, a hang or a memory bomb in a parser ends a worker of this program, not
+the application that loads libddb. DroneDB runs it as a child process and talks to it over a
+line-based JSON protocol.
 
 ```
 gdal-util --version              # gdal-util <version> protocol <major>.<minor>
