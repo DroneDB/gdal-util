@@ -47,7 +47,7 @@ such a file: read it, never open a path or a URL in it.
 | --- | --- |
 | `gdal-util --version` | Prints one line, `gdal-util <version> protocol <major>.<minor>`, and exits 0. `<version>` is the version of the DroneDB build that contains the program. Nothing else is initialised. |
 | `gdal-util --serve` | Serves the requests of this document on standard input and output. File paths are never taken from the command line in this mode. In the sandbox mode `strict` it exits with status 3 and a message that names the missing layer, without serving, when this host lacks a layer (section 9). |
-| `gdal-util --request '<json>'` | Handles the one request given as the argument, in this process, writes its response line to standard output and exits 0 when the response is a success and 1 when it is a failure. An operation that runs long (`cog`, `copc`, `mask`) writes progress lines before the response, each a line of its own: `{"progress":<number>}`, the fraction done from 0 to 1, rising. The operations `cog`, `copc`, `vector`, `geoproject`, `sampleCloud`, `mask`, `rasterShapes`, `resizeImages`, `mergeBands` and `mergePreview` run only in this mode. The client writes the argument in ASCII, every other character as a `\uXXXX` escape of JSON: Windows passes a command line to a program in its ANSI code page, which changes the bytes of UTF-8 text. |
+| `gdal-util --request '<json>'` | Handles the one request given as the argument, in this process, writes its response line to standard output and exits 0 when the response is a success and 1 when it is a failure. An operation that runs long (`cog`, `copc`, `mask`) writes progress lines before the response, each a line of its own: `{"progress":<number>}`, the fraction done from 0 to 1, rising. The operations `cog`, `copc`, `vector`, `geoproject`, `sampleCloud`, `mask`, `rasterShapes`, `resizeImages`, `mergeBands`, `mergePreview`, `align` and `alignValidation` run only in this mode. The client writes the argument in ASCII, every other character as a `\uXXXX` escape of JSON: Windows passes a command line to a program in its ANSI code page, which changes the bytes of UTF-8 text. |
 | `gdal-util --sandbox-report` | Prints the sandbox mode and, one line per layer, whether this host offers it (section 9), and exits 0 whatever is missing. |
 | anything else | Prints a usage line to standard error and exits 2. |
 
@@ -61,9 +61,9 @@ Every request is an object:
 | Member | Type | Meaning |
 | --- | --- | --- |
 | `id` | integer | A signed 64-bit integer, echoed in the response. |
-| `op` | string | The operation: `probe`, `thumbnail`, `normalize`, `geoproject`, `cog`, `copc`, `vector`, `pointCloudInfo`, `sampleCloud`, `mask`, `rasterShapes`, `resizeImages`, `mergeBands` or `mergePreview`. |
+| `op` | string | The operation: `probe`, `thumbnail`, `normalize`, `geoproject`, `cog`, `copc`, `vector`, `pointCloudInfo`, `sampleCloud`, `mask`, `rasterShapes`, `resizeImages`, `mergeBands`, `mergePreview`, `align` or `alignValidation`. |
 | `path` | string | The file to read: an absolute path. See section 6 for `path64`. |
-| `out` | string | The file to write (a folder, for `vector` and `resizeImages`), an absolute path, for the operations that write (`thumbnail`, `normalize`, `geoproject`, `cog`, `copc`, `vector`, `sampleCloud`, `mask`, `resizeImages`, `mergeBands`, `mergePreview`). The folder it lies in exists and is the only place the operation writes to (for `cog`, a scratch file or two and the statistics beside the COG; for `copc`, the temporary files of the build). See section 6 for `out64`. |
+| `out` | string | The file to write (a folder, for `vector` and `resizeImages`), an absolute path, for the operations that write (`thumbnail`, `normalize`, `geoproject`, `cog`, `copc`, `vector`, `sampleCloud`, `mask`, `resizeImages`, `mergeBands`, `mergePreview`, `align`). The folder it lies in exists and is the only place the operation writes to (for `cog`, a scratch file or two and the statistics beside the COG; for `copc`, the temporary files of the build). See section 6 for `out64`. |
 | `params` | object | The members the operation defines. A missing `params` is an empty object. |
 
 Members a request does not define are ignored, so that later minor versions can add optional
@@ -375,6 +375,27 @@ Writes `out`, a WebP of `size` x `size` pixels of the stack of `inputs`: its `ba
 3), each scaled to bytes from its minimum and maximum (`gdal_translate -outsize -ot Byte -scale -b`).
 The result is `{}`. Runs only with `--request`.
 
+### 3.15 `align` and `alignValidation` (1.3)
+
+```json
+{"id":20,"op":"align","path":"/data/ds/survey-2.tif","out":"/data/ds/.align-stage-x/aligned.tif","params":{"reference":"/data/ds/survey-1.tif","options":{"mode":"similarity","patchSize":64,"searchRadius":128,"maxPatches":400,"ransacIterations":1000,"ransacThreshold":2.0,"minInliers":8,"minInlierRatio":0.25,"usePhaseCorrelationSeed":true,"minCorrelation":0.03,"minCorrelationOverChance":3.0,"minOverlap":0.25,"maxScaleChange":0.2,"maxRotationDeg":15.0}}}
+```
+
+`align` aligns the raster `path` (an orthophoto or a DEM) to the raster `reference` (`reference64`
+when it is no UTF-8) with the `options` of DroneDB's alignment (every member, as its build writes them):
+the reference is reprojected into the CRS of `path` when they differ, both are read onto a common grid
+and matched (translation or similarity), and `path` is warped by the transform found (bilinear, its own
+CRS and pixel size), a DEM shifted by the median difference of the heights, and written to `out`
+without loss (DEFLATE with the predictor of its type). Its scratch rasters go to a folder in the folder
+of `out`, removed at the end. The result is the alignment: `{"success", "tx", "ty", "thetaDeg", "scale",
+"shiftZ", "inlierCount", "inlierRatio", "rmse", "confidence", "correlation", "overlap", "pivotX",
+"pivotY", "mode", "warning"}`. Rasters that cannot be aligned (no overlap, no texture, a match that is
+not good enough) are `error: "internal"` with why.
+
+`alignValidation` (no `out`) checks the pair before an alignment: the result is `{"ok", "errors",
+"warnings", "summary": {"sourceCrs", "referenceCrs", "crsMismatch", "overlapPercent", "sourceType",
+"referenceType", "sourceGsdM", "referenceGsdM"}}`. Both run only with `--request`.
+
 ## 4. Responses
 
 A success: `{"id": <id>, "ok": true, "result": {...}}`. A failure:
@@ -405,7 +426,7 @@ with an `id` it did not ask for as a broken program.
 | Wall time of `probe` and `thumbnail` | 30 s (the client's timeout) |
 | Wall time of `normalize` | 120 s (the client's timeout) |
 | Pixels of a raster to `normalize` | 1 000 000 000 (width times height) |
-| Time of `cog`, `copc`, `vector`, `geoproject`, `mask`, `rasterShapes`, `resizeImages`, `mergeBands` and `mergePreview` | no limit of the protocol: the client ends the process after an idle time without a line, or at its maximum run time |
+| Time of `cog`, `copc`, `vector`, `geoproject`, `mask`, `rasterShapes`, `resizeImages`, `mergeBands`, `mergePreview`, `align` and `alignValidation` | no limit of the protocol: the client ends the process after an idle time without a line, or at its maximum run time |
 | Cpu time, memory, file size and open files of a worker | by operation, section 9 |
 
 ## 6. Text that is not UTF-8
@@ -461,7 +482,7 @@ layer the host lacks:
 What a worker may do once confined (Linux; README.md has the details and the other systems):
 
 * **Read** the folder of `path`; the folders of the `source` and `sidecar` params, of the
-  `inputs` of `copc` and `rasterShapes` and of the sources of `resizeImages` and of the `inputs` of `mergeBands` and `mergePreview`; the folders of the data of GDAL and PROJ, of the files libddb ships and of
+  `inputs` of `copc` and `rasterShapes` and of the sources of `resizeImages` and of the `inputs` of `mergeBands` and `mergePreview`, the `reference` of `align` and `alignValidation`; the folders of the data of GDAL and PROJ, of the files libddb ships and of
   the program, and of the libraries it loaded; the user directory of PROJ; the system files it needs (`/proc/self`, `/dev/null`,
   `/dev/urandom`, `/etc/localtime`, the time zone data). Nothing else.
 * **Write** in the folder `out` lies in (the folder `out` is, for `vector` and `resizeImages`), which the client made
@@ -469,7 +490,7 @@ What a worker may do once confined (Linux; README.md has the details and the oth
 * **Not** open a network socket, start a program or another process (a thread is allowed), leave
   its process group, trace another process or signal another process.
 * **Limits**, set for each request from its operation: cpu time below the client's wait (25 s for
-  `probe` and `thumbnail`, 110 s for `normalize`; `cog`, `copc`, `vector`, `geoproject`, `mask`, `rasterShapes`, `resizeImages`, `mergeBands` and `mergePreview` the run time
+  `probe` and `thumbnail`, 110 s for `normalize`; `cog`, `copc`, `vector`, `geoproject`, `mask`, `rasterShapes`, `resizeImages`, `mergeBands`, `mergePreview`, `align` and `alignValidation` the run time
   of the client for each thread), address space (a share of the memory of the machine or its
   container; for `copc` plus the size of its point clouds, which the builder maps whole), the size of a file written, open files, no core files. A limit the process already
   has from its starter (`ulimit`, a container) is never raised. The cpu time of a process is that
