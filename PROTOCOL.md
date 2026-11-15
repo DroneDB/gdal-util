@@ -307,8 +307,11 @@ The result is `{}`. A file that is not a point cloud of those formats, or that c
 Writes `out`, the raster `path` with its borders masked: `gdal_nearblack -setmask -alg floodfill
 -near <nearDist>` (`-white`, or `-color <color>`), the mask an internal 1-bit mask of a tiled
 GeoTIFF. The compression follows the layout: JPEG (quality 75) for 3 bands of 8 bits (YCbCr) and
-for 1 band of 8 bits, DEFLATE with the predictor of the type otherwise. Runs only with
-`--request`, which writes progress lines.
+for 1 band of 8 bits, DEFLATE with the predictor of the type otherwise. A raster of 1 band of more
+than 8 bits (a DEM, a thermal raster) keeps its type and every sample, which nearblack, writing 8
+bits only, does not: its mask is the one nearblack computes from which samples are near the border
+colour, and it also hides the samples that are NoData or NaN; its `color` is one number. Runs only
+with `--request`, which writes progress lines.
 
 | `params` member | Type | Meaning |
 | --- | --- | --- |
