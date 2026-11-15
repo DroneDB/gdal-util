@@ -302,6 +302,12 @@ namespace gdalutil
                 if (!params.source.empty())
                     add(paths, folderOf(params.source));
             }
+            // The photos of an operation for a call
+            else if (raster::isHelperOperation(request.op))
+            {
+                for (const fs::path &input : tolerant([&] { return raster::helperOperationInputs(request); }))
+                    add(paths, folderOf(input));
+            }
             // The point clouds merged with `path`
             else if (request.op == op::kCopc)
             {
@@ -345,7 +351,7 @@ namespace gdalutil
         {
             if (request.out.empty())
                 return {};
-            return request.op == op::kVector ? request.out : request.out.parent_path();
+            return raster::outIsFolder(request.op) ? request.out : request.out.parent_path();
         }
     } // namespace
 

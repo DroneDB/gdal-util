@@ -47,7 +47,7 @@ such a file: read it, never open a path or a URL in it.
 | --- | --- |
 | `gdal-util --version` | Prints one line, `gdal-util <version> protocol <major>.<minor>`, and exits 0. `<version>` is the version of the DroneDB build that contains the program. Nothing else is initialised. |
 | `gdal-util --serve` | Serves the requests of this document on standard input and output. File paths are never taken from the command line in this mode. In the sandbox mode `strict` it exits with status 3 and a message that names the missing layer, without serving, when this host lacks a layer (section 9). |
-| `gdal-util --request '<json>'` | Handles the one request given as the argument, in this process, writes its response line to standard output and exits 0 when the response is a success and 1 when it is a failure. An operation that runs long (`cog`, `copc`, `mask`) writes progress lines before the response, each a line of its own: `{"progress":<number>}`, the fraction done from 0 to 1, rising. The operations `cog`, `copc`, `vector`, `geoproject`, `sampleCloud` and `mask` run only in this mode. The client writes the argument in ASCII, every other character as a `\uXXXX` escape of JSON: Windows passes a command line to a program in its ANSI code page, which changes the bytes of UTF-8 text. |
+| `gdal-util --request '<json>'` | Handles the one request given as the argument, in this process, writes its response line to standard output and exits 0 when the response is a success and 1 when it is a failure. An operation that runs long (`cog`, `copc`, `mask`) writes progress lines before the response, each a line of its own: `{"progress":<number>}`, the fraction done from 0 to 1, rising. The operations `cog`, `copc`, `vector`, `geoproject`, `sampleCloud`, `mask`, `imageSizes` and `resizeImages` run only in this mode. The client writes the argument in ASCII, every other character as a `\uXXXX` escape of JSON: Windows passes a command line to a program in its ANSI code page, which changes the bytes of UTF-8 text. |
 | `gdal-util --sandbox-report` | Prints the sandbox mode and, one line per layer, whether this host offers it (section 9), and exits 0 whatever is missing. |
 | anything else | Prints a usage line to standard error and exits 2. |
 
@@ -61,9 +61,9 @@ Every request is an object:
 | Member | Type | Meaning |
 | --- | --- | --- |
 | `id` | integer | A signed 64-bit integer, echoed in the response. |
-| `op` | string | The operation: `probe`, `thumbnail`, `normalize`, `geoproject`, `cog`, `copc`, `vector`, `pointCloudInfo`, `sampleCloud` or `mask`. |
+| `op` | string | The operation: `probe`, `thumbnail`, `normalize`, `geoproject`, `cog`, `copc`, `vector`, `pointCloudInfo`, `sampleCloud`, `mask`, `imageSizes` or `resizeImages`. |
 | `path` | string | The file to read: an absolute path. See section 6 for `path64`. |
-| `out` | string | The file to write (a folder, for `vector`), an absolute path, for the operations that write (`thumbnail`, `normalize`, `geoproject`, `cog`, `copc`, `vector`, `sampleCloud`, `mask`). The folder it lies in exists and is the only place the operation writes to (for `cog`, a scratch file or two and the statistics beside the COG; for `copc`, the temporary files of the build). See section 6 for `out64`. |
+| `out` | string | The file to write (a folder, for `vector` and `resizeImages`), an absolute path, for the operations that write (`thumbnail`, `normalize`, `geoproject`, `cog`, `copc`, `vector`, `sampleCloud`, `mask`, `resizeImages`). The folder it lies in exists and is the only place the operation writes to (for `cog`, a scratch file or two and the statistics beside the COG; for `copc`, the temporary files of the build). See section 6 for `out64`. |
 | `params` | object | The members the operation defines. A missing `params` is an empty object. |
 
 Members a request does not define are ignored, so that later minor versions can add optional
@@ -323,6 +323,30 @@ with `--request`, which writes progress lines.
 The result is `{}`. A raster that masking does not cover (not 1, 3 or 4 bands; 3 or 4 bands that
 are not 8-bit; a fourth band that is not alpha) is `error: "invalid"`.
 
+### 3.11 `imageSizes` (1.3)
+
+```json
+{"id":16,"op":"imageSizes","path":"/data/odm/images/a.JPG","params":{"inputs":[{"path":"/data/odm/images/a.JPG"},{"path":"/data/odm/images/b.JPG"}]}}
+```
+
+Reads the size of each photo of `inputs` (`path` is the first of them; no `out`). The result is
+`{"sizes": [...]}`, one item per photo in their order: `{"width", "height"}`, or `{"error"}` with why
+the photo cannot be read. Runs only with `--request`.
+
+### 3.12 `resizeImages` (1.3)
+
+```json
+{"id":17,"op":"resizeImages","path":"/data/odm/images/a.JPG","out":"/data/train/ddb-resized-images-x","params":{"images":[{"source":"/data/odm/images/a.JPG","name":"a.JPG","width":1600,"height":1200}],"quality":95,"threads":8}}
+```
+
+Writes each photo of `images` (`source`, a path) as a JPEG of `width` x `height` pixels named `name`
+(a file name, nothing else) in the folder `out`: `gdal_translate -of JPEG -co QUALITY=<quality> -co
+WRITE_EXIF_METADATA=NO -outsize -r average`; 16-bit samples are scaled from the range of their type
+to bytes, and 1 or 3 bands are kept. `path` is the first source. `quality` is 1 to 100 (default 95),
+`threads` the photos resized at once (1 to 4096; default 8). The result is `{"errors": [...]}`, one
+string per photo in their order: empty when it was written, else why it was not (and no file is
+left for it). Runs only with `--request`, which writes progress lines.
+
 ## 4. Responses
 
 A success: `{"id": <id>, "ok": true, "result": {...}}`. A failure:
@@ -353,7 +377,7 @@ with an `id` it did not ask for as a broken program.
 | Wall time of `probe` and `thumbnail` | 30 s (the client's timeout) |
 | Wall time of `normalize` | 120 s (the client's timeout) |
 | Pixels of a raster to `normalize` | 1 000 000 000 (width times height) |
-| Time of `cog`, `copc`, `vector`, `geoproject` and `mask` | no limit of the protocol: the client ends the process after an idle time without a line, or at its maximum run time |
+| Time of `cog`, `copc`, `vector`, `geoproject`, `mask`, `imageSizes` and `resizeImages` | no limit of the protocol: the client ends the process after an idle time without a line, or at its maximum run time |
 | Cpu time, memory, file size and open files of a worker | by operation, section 9 |
 
 ## 6. Text that is not UTF-8
@@ -408,16 +432,16 @@ layer the host lacks:
 
 What a worker may do once confined (Linux; README.md has the details and the other systems):
 
-* **Read** the folder of `path`; the folders of the `source` and `sidecar` params and of the
-  `inputs` of `copc`; the folders of the data of GDAL and PROJ, of the files libddb ships and of
+* **Read** the folder of `path`; the folders of the `source` and `sidecar` params, of the
+  `inputs` of `copc` and `imageSizes` and of the sources of `resizeImages`; the folders of the data of GDAL and PROJ, of the files libddb ships and of
   the program, and of the libraries it loaded; the user directory of PROJ; the system files it needs (`/proc/self`, `/dev/null`,
   `/dev/urandom`, `/etc/localtime`, the time zone data). Nothing else.
-* **Write** in the folder `out` lies in (the folder `out` is, for `vector`), which the client made
+* **Write** in the folder `out` lies in (the folder `out` is, for `vector` and `resizeImages`), which the client made
   for the request and which must exist. Nothing else.
 * **Not** open a network socket, start a program or another process (a thread is allowed), leave
   its process group, trace another process or signal another process.
 * **Limits**, set for each request from its operation: cpu time below the client's wait (25 s for
-  `probe` and `thumbnail`, 110 s for `normalize`; `cog`, `copc`, `vector`, `geoproject` and `mask` the run time
+  `probe` and `thumbnail`, 110 s for `normalize`; `cog`, `copc`, `vector`, `geoproject`, `mask`, `imageSizes` and `resizeImages` the run time
   of the client for each thread), address space (a share of the memory of the machine or its
   container; for `copc` plus the size of its point clouds, which the builder maps whole), the size of a file written, open files, no core files. A limit the process already
   has from its starter (`ulimit`, a container) is never raised. The cpu time of a process is that
