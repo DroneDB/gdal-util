@@ -1,6 +1,6 @@
 # gdal-util protocol
 
-**Protocol version 1.2**
+**Protocol version 1.3**
 
 SPDX-License-Identifier: CC0-1.0
 
@@ -47,7 +47,7 @@ such a file: read it, never open a path or a URL in it.
 | --- | --- |
 | `gdal-util --version` | Prints one line, `gdal-util <version> protocol <major>.<minor>`, and exits 0. `<version>` is the version of the DroneDB build that contains the program. Nothing else is initialised. |
 | `gdal-util --serve` | Serves the requests of this document on standard input and output. File paths are never taken from the command line in this mode. In the sandbox mode `strict` it exits with status 3 and a message that names the missing layer, without serving, when this host lacks a layer (section 9). |
-| `gdal-util --request '<json>'` | Handles the one request given as the argument, in this process, writes its response line to standard output and exits 0 when the response is a success and 1 when it is a failure. An operation that runs long (`cog`, `copc`) writes progress lines before the response, each a line of its own: `{"progress":<number>}`, the fraction done from 0 to 1, rising. The operations `cog`, `copc`, `vector` and `geoproject` run only in this mode. The client writes the argument in ASCII, every other character as a `\uXXXX` escape of JSON: Windows passes a command line to a program in its ANSI code page, which changes the bytes of UTF-8 text. |
+| `gdal-util --request '<json>'` | Handles the one request given as the argument, in this process, writes its response line to standard output and exits 0 when the response is a success and 1 when it is a failure. An operation that runs long (`cog`, `copc`, `mask`) writes progress lines before the response, each a line of its own: `{"progress":<number>}`, the fraction done from 0 to 1, rising. The operations `cog`, `copc`, `vector`, `geoproject`, `sampleCloud` and `mask` run only in this mode. The client writes the argument in ASCII, every other character as a `\uXXXX` escape of JSON: Windows passes a command line to a program in its ANSI code page, which changes the bytes of UTF-8 text. |
 | `gdal-util --sandbox-report` | Prints the sandbox mode and, one line per layer, whether this host offers it (section 9), and exits 0 whatever is missing. |
 | anything else | Prints a usage line to standard error and exits 2. |
 
@@ -61,9 +61,9 @@ Every request is an object:
 | Member | Type | Meaning |
 | --- | --- | --- |
 | `id` | integer | A signed 64-bit integer, echoed in the response. |
-| `op` | string | The operation: `probe`, `thumbnail`, `normalize`, `geoproject`, `cog`, `copc` or `vector`. |
+| `op` | string | The operation: `probe`, `thumbnail`, `normalize`, `geoproject`, `cog`, `copc`, `vector`, `pointCloudInfo`, `sampleCloud` or `mask`. |
 | `path` | string | The file to read: an absolute path. See section 6 for `path64`. |
-| `out` | string | The file to write (a folder, for `vector`), an absolute path, for the operations that write (`thumbnail`, `normalize`, `geoproject`, `cog`, `copc`, `vector`). The folder it lies in exists and is the only place the operation writes to (for `cog`, a scratch file or two and the statistics beside the COG; for `copc`, the temporary files of the build). See section 6 for `out64`. |
+| `out` | string | The file to write (a folder, for `vector`), an absolute path, for the operations that write (`thumbnail`, `normalize`, `geoproject`, `cog`, `copc`, `vector`, `sampleCloud`, `mask`). The folder it lies in exists and is the only place the operation writes to (for `cog`, a scratch file or two and the statistics beside the COG; for `copc`, the temporary files of the build). See section 6 for `out64`. |
 | `params` | object | The members the operation defines. A missing `params` is an empty object. |
 
 Members a request does not define are ignored, so that later minor versions can add optional
@@ -298,6 +298,28 @@ writes progress lines as it reads the points.
 The result is `{}`. A file that is not a point cloud of those formats, or that cannot be read, is
 `error: "unreadable"`.
 
+### 3.10 `mask` (1.3)
+
+```json
+{"id":15,"op":"mask","path":"/data/ds/ortho.tif","out":"/data/ds/.mask-stage-x/ortho_masked.tif","params":{"nearDist":15,"white":false,"threads":8}}
+```
+
+Writes `out`, the raster `path` with its borders masked: `gdal_nearblack -setmask -alg floodfill
+-near <nearDist>` (`-white`, or `-color <color>`), the mask an internal 1-bit mask of a tiled
+GeoTIFF. The compression follows the layout: JPEG (quality 75) for 3 bands of 8 bits (YCbCr) and
+for 1 band of 8 bits, DEFLATE with the predictor of the type otherwise. Runs only with
+`--request`, which writes progress lines.
+
+| `params` member | Type | Meaning |
+| --- | --- | --- |
+| `nearDist` | integer | How far from the border colour a pixel may be and still be a border (`-near`). Default 15. |
+| `white` | boolean | The borders are white, not black. Default false. |
+| `color` | string | The border colour, `c1,c2,c3...` (`-color`); takes the place of `white`. |
+| `threads` | integer | The threads of the compression, 1 to 4096. Default: what the configuration allows. |
+
+The result is `{}`. A raster that masking does not cover (not 1, 3 or 4 bands; 3 or 4 bands that
+are not 8-bit; a fourth band that is not alpha) is `error: "invalid"`.
+
 ## 4. Responses
 
 A success: `{"id": <id>, "ok": true, "result": {...}}`. A failure:
@@ -313,6 +335,7 @@ request had none that could be read.
 | `crashed` | The worker ended without a response. |
 | `timeout` | The client's deadline passed. Never written by the program; clients use it for their own timeouts. |
 | `nospace` | The device `out` lies on is full. |
+| `invalid` | (1.3) The operation refuses its arguments for this file: a `mask` of a raster of 2 bands. Answered only to the operations of 1.3. |
 | `internal` | Anything else: a request that is not valid, an operation that does not exist or is not available, a defect. |
 
 A client treats a response line longer than 16 MiB, a line that is not valid JSON, or a response
@@ -327,7 +350,7 @@ with an `id` it did not ask for as a broken program.
 | Wall time of `probe` and `thumbnail` | 30 s (the client's timeout) |
 | Wall time of `normalize` | 120 s (the client's timeout) |
 | Pixels of a raster to `normalize` | 1 000 000 000 (width times height) |
-| Time of `cog`, `copc`, `vector` and `geoproject` | no limit of the protocol: the client ends the process after an idle time without a line, or at its maximum run time |
+| Time of `cog`, `copc`, `vector`, `geoproject` and `mask` | no limit of the protocol: the client ends the process after an idle time without a line, or at its maximum run time |
 | Cpu time, memory, file size and open files of a worker | by operation, section 9 |
 
 ## 6. Text that is not UTF-8
@@ -348,7 +371,8 @@ document.
 * A change that existing clients can read raises the **minor** number: new optional request
   members, new response members, new operations. Clients ignore response members they do not know.
   A new value of `error` is not such a change, since a client has to treat each value in its own
-  way.
+  way, unless it is answered only to the operations of the same minor version (`invalid` in 1.3),
+  which a client of an earlier one does not send.
 * A client implementing version `C.m` accepts a server of version `S.n` only when `S` = `C` and
   `n` >= `m`. A client checks the version once, when it starts a server, with `--version`.
 
@@ -390,7 +414,7 @@ What a worker may do once confined (Linux; README.md has the details and the oth
 * **Not** open a network socket, start a program or another process (a thread is allowed), leave
   its process group, trace another process or signal another process.
 * **Limits**, set for each request from its operation: cpu time below the client's wait (25 s for
-  `probe` and `thumbnail`, 110 s for `normalize`; `cog`, `copc`, `vector` and `geoproject` the run time
+  `probe` and `thumbnail`, 110 s for `normalize`; `cog`, `copc`, `vector`, `geoproject` and `mask` the run time
   of the client for each thread), address space (a share of the memory of the machine or its
   container; for `copc` plus the size of its point clouds, which the builder maps whole), the size of a file written, open files, no core files. A limit the process already
   has from its starter (`ulimit`, a container) is never raised. The cpu time of a process is that

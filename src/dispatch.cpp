@@ -14,6 +14,7 @@
 
 #include "gdal_inc.h"
 #include "gdal_raii.h"
+#include "helper_operations.h"
 #include "logger.h"
 #include "memory_watch.h"
 #include "mio.h"
@@ -154,6 +155,16 @@ namespace gdalutil
                 if (request.op == raster::op::kSampleCloud)
                     return [&request, progress] { return sampleCloud(request, *progress); };
                 return [&request] { return buildVector(request); };
+            }
+            // The operations on users' rasters for a call of the host: one process each, as a build
+            if (raster::isHelperOperation(request.op))
+            {
+                if (progress == nullptr)
+                    throw raster::ProtocolError("the operation '" + request.op + "' runs only with --request");
+                return [&request, progress] {
+                    return raster::runHelperOperation(request.op, requiredPath(request.path, "path"),
+                                                      requiredPath(request.out, "out"), request.params, *progress);
+                };
             }
             throw raster::ProtocolError("unknown operation '" + request.op + "'");
         }
