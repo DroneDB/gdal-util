@@ -162,7 +162,7 @@ namespace gdalutil
                 if (progress == nullptr)
                     throw raster::ProtocolError("the operation '" + request.op + "' runs only with --request");
                 return [&request, progress] {
-                    // An operation that writes nothing (imageSizes) has no `out`
+                    // An operation that writes nothing (rasterShapes) has no `out`
                     const fs::path out = request.out.empty() ? fs::path() : requiredPath(request.out, "out");
                     return raster::runHelperOperation(request.op, requiredPath(request.path, "path"), out,
                                                       request.params, *progress);
