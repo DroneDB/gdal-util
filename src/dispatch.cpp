@@ -17,6 +17,7 @@
 #include "logger.h"
 #include "memory_watch.h"
 #include "mio.h"
+#include "pointcloud.h"
 #include "raster_ops.h"
 
 namespace gdalutil
@@ -43,6 +44,11 @@ namespace gdalutil
         {
             const auto params = raster::probeParamsFromJson(request.params);
             return raster::toJson(raster::probe(requiredPath(request.path, "path"), params));
+        }
+
+        json pointCloudInfo(const Request &request)
+        {
+            return raster::pointCloudInfoJson(readPointCloudInfo(requiredPath(request.path, "path")));
         }
 
         json thumbnail(const Request &request)
@@ -117,6 +123,8 @@ namespace gdalutil
         {
             if (request.op == raster::op::kProbe)
                 return onOneGdalThread([&request] { return probe(request); });
+            if (request.op == raster::op::kPointCloudInfo)
+                return [&request] { return pointCloudInfo(request); };
             if (request.op == raster::op::kThumbnail)
                 return onOneGdalThread([&request] { return thumbnail(request); });
             if (request.op == raster::op::kNormalize)

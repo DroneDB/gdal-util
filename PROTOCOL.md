@@ -1,6 +1,6 @@
 # gdal-util protocol
 
-**Protocol version 1.1**
+**Protocol version 1.2**
 
 SPDX-License-Identifier: CC0-1.0
 
@@ -247,6 +247,34 @@ GeoPackage that the `vector` operation wrote.
 The result is `{}`. A file that GDAL cannot open as a raster is `error: "unreadable"`. A raster of
 more than 1 000 000 000 pixels (width times height) is `error: "limit"`, with a message that says
 to build the dataset first; the request writes nothing then. A full device is `error: "nospace"`.
+
+### 3.8 `pointCloudInfo` (1.2)
+
+```json
+{"id":13,"op":"pointCloudInfo","path":"/data/ds/cloud.laz","params":{}}
+```
+
+Reads what the entry of a dataset needs of a point cloud (LAS, LAZ, E57, XYZ or PTS): its point
+count, coordinate system and dimensions, and its footprint. LAS and LAZ files give their count and
+bounds from their header; the points of the other formats are read once for their exact count
+(XYZ, PTS) or, when the cloud has a coordinate system, its bounds (E57). The operation has no
+params.
+
+| Member | Type | Meaning |
+| --- | --- | --- |
+| `pointCount` | number | The number of points. |
+| `dimensions` | array | The names of the dimensions of the points, as PDAL names them, in its order. |
+| `wkt` | string | The coordinate system of the cloud as the file states it (WKT). Absent when it has none. |
+| `bounds` | array | `[minX, minY, minZ, maxX, maxY, maxZ]` in the coordinate system of the cloud. Absent for XYZ and PTS files and when they are not known. |
+| `pointGeom` | object | A GeoJSON `Point`, WGS84: the centre of the footprint, at the lowest height. Absent when there is none. |
+| `polygonGeom` | object | A GeoJSON `Polygon` of one closed ring, WGS84: the footprint of the bounds. Absent when there is none. |
+| `warning` | string | Why a cloud with a coordinate system and bounds has no footprint (at most 2000 bytes). |
+
+```json
+{"id":13,"ok":true,"result":{"pointCount":903713,"dimensions":["X","Y","Z","Intensity"],"wkt":"PROJCS[...]","bounds":[576662.6,5188115.1,156.0,576767.5,5188210.8,169.4],"polygonGeom":{"type":"Polygon","coordinates":[[[-91.995,46.842,156.0],[-91.993,46.842,156.0],[-91.993,46.843,156.0],[-91.995,46.843,156.0],[-91.995,46.842,156.0]]]},"pointGeom":{"type":"Point","coordinates":[-91.994,46.843,156.0]}}}
+```
+
+A file that is not a point cloud of those formats, or that cannot be read, is `error: "unreadable"`.
 
 ## 4. Responses
 
