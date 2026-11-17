@@ -1,6 +1,6 @@
 # gdal-util protocol
 
-**Protocol version 1.3**
+**Protocol version 1.4**
 
 SPDX-License-Identifier: CC0-1.0
 
@@ -198,11 +198,28 @@ temporary files of the build go in the folder of `out`; nothing else is left the
 | --- | --- | --- |
 | `inputs` | array | The point clouds merged with `path`, in their order after it: an object each, with the absolute path of the file in `path` (or `path64`, section 6). Default: none. |
 | `threads` | integer | The most threads the build may use, 1 to 4096, as for `cog`. |
+| `targetCrs` | string | (1.4) The coordinate system the points are transformed to: `"EPSG:<code>"`, `"EPSG:<horizontal>+<vertical>"` or a WKT. The client chooses it (the `targetCrs` of `pointCloudInfo`). Absent or empty: the COPC keeps the coordinate system of the clouds. |
 
 The memory of the build is bounded by `DDBT_COPC_BUILD_MEM_MB` in the environment of the process
 (in MiB; default 4 GiB, at most half the memory of the machine): a larger cloud spills to the
-folder of `out`. The result is `{}`. A file that is no point cloud the builder reads, or a cloud
-without points, is `error: "unreadable"`. A full device is `error: "nospace"`.
+folder of `out`, where the builder also writes its report (removed before the response). A file
+that is no point cloud the builder reads, a cloud without points, and a target the points cannot be
+transformed to (an input without a coordinate system, a target that cannot be read) are `error:
+"unreadable"`. A full device is `error: "nospace"`.
+
+The result (1.4; `{}` before) is what the builder reports of the octree of the COPC, which its
+header does not tell; the client reads the coordinate system, the count and the bounds from the
+file itself:
+
+| Member | Type | Meaning |
+| --- | --- | --- |
+| `transformed` | boolean | Whether the points were transformed to `targetCrs`. |
+| `maxNodePoints` | number | The most points of one node of the octree. Absent when the builder does not report it. |
+| `warnings` | array | The builder's warnings, strings of at most 2000 bytes: "degenerate octree" for a node far larger than the leaves (an octree that does not split the cloud). |
+
+```json
+{"id":13,"ok":true,"result":{"transformed":true,"maxNodePoints":214011,"warnings":[]}}
+```
 
 ### 3.6 `vector`
 
@@ -268,10 +285,15 @@ params.
 | `bounds` | array | `[minX, minY, minZ, maxX, maxY, maxZ]` in the coordinate system of the cloud. Absent for XYZ and PTS files and when they are not known. |
 | `pointGeom` | object | A GeoJSON `Point`, WGS84: the centre of the footprint, at the lowest height. Absent when there is none. |
 | `polygonGeom` | object | A GeoJSON `Polygon` of one closed ring, WGS84: the footprint of the bounds. Absent when there is none. |
-| `warning` | string | Why a cloud with a coordinate system and bounds has no footprint (at most 2000 bytes). |
+| `warning` | string | Why a cloud with a coordinate system and bounds has no footprint (at most 2000 bytes). For a coordinate system the coordinates do not fit, `"coordinate system ignored: the coordinates do not fit <name>"`. |
+| `crsStatus` | string | (1.4) What the coordinate system is, checked against the bounds: `projected` (in any unit, or compound with a projected part), `geographic`, `geocentric`, `local` (an engineering CRS), `none` (none, or one that cannot be read) or `implausible`. A coordinate system is implausible when the coordinates do not fit it: a geographic one with x outside [-180, 180] or y outside [-90, 90]; a geocentric one whose corners are not 6,300 to 6,420 km from the centre of the earth; a projected one more than 5 degrees outside its area of use. The cloud of an implausible one has no footprint. Always present. |
+| `targetCrs` | string | (1.4) The coordinate system the COPC of a `geographic` or `geocentric` cloud is built in, as `targetCrs` of `copc` takes it: UTM of the centre of the footprint (on the datum of the cloud when EPSG has one), UPS north of 84 degrees and south of 80 degrees south, a transverse Mercator centred on a footprint that reaches more than 3 degrees from the central meridian of its zone; a compound cloud keeps its vertical part, in metres; a geocentric or 3-D geographic one gets the ellipsoidal height. Absent for the other clouds. |
+
+The footprint of a geocentric cloud is the envelope of its points, read and transformed in 3-D (its
+bounds alone say little of where it lies on the curved earth).
 
 ```json
-{"id":13,"ok":true,"result":{"pointCount":903713,"dimensions":["X","Y","Z","Intensity"],"wkt":"PROJCS[...]","bounds":[576662.6,5188115.1,156.0,576767.5,5188210.8,169.4],"polygonGeom":{"type":"Polygon","coordinates":[[[-91.995,46.842,156.0],[-91.993,46.842,156.0],[-91.993,46.843,156.0],[-91.995,46.843,156.0],[-91.995,46.842,156.0]]]},"pointGeom":{"type":"Point","coordinates":[-91.994,46.843,156.0]}}}
+{"id":13,"ok":true,"result":{"pointCount":903713,"dimensions":["X","Y","Z","Intensity"],"wkt":"PROJCS[...]","crsStatus":"projected","bounds":[576662.6,5188115.1,156.0,576767.5,5188210.8,169.4],"polygonGeom":{"type":"Polygon","coordinates":[[[-91.995,46.842,156.0],[-91.993,46.842,156.0],[-91.993,46.843,156.0],[-91.995,46.843,156.0],[-91.995,46.842,156.0]]]},"pointGeom":{"type":"Point","coordinates":[-91.994,46.843,156.0]}}}
 ```
 
 A file that is not a point cloud of those formats, or that cannot be read, is `error: "unreadable"`.

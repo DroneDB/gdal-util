@@ -85,8 +85,8 @@ namespace gdalutil
             const auto params = raster::copcParamsFromJson(request.params);
             for (const fs::path &input : params.inputs)
                 requiredPath(input, "input");
-            raster::buildCopcFile(requiredPath(request.path, "path"), requiredPath(request.out, "out"), params, progress);
-            return json::object();
+            return raster::toJson(
+                raster::buildCopcFile(requiredPath(request.path, "path"), requiredPath(request.out, "out"), params, progress));
         }
 
         json buildVector(const Request &request)
