@@ -61,7 +61,7 @@ Every request is an object:
 | Member | Type | Meaning |
 | --- | --- | --- |
 | `id` | integer | A signed 64-bit integer, echoed in the response. |
-| `op` | string | The operation: `probe`, `thumbnail`, `normalize`, `geoproject`, `cog`, `copc`, `vector`, `pointCloudInfo`, `sampleCloud`, `mask`, `rasterShapes`, `resizeImages`, `mergeBands`, `mergePreview`, `align`, `alignValidation`, `statistics` or `photoTile`. |
+| `op` | string | The operation: `probe`, `thumbnail`, `normalize`, `geoproject`, `cog`, `copc`, `vector`, `pointCloudInfo`, `sampleCloud`, `mask`, `rasterShapes`, `resizeImages`, `mergeBands`, `mergePreview`, `align`, `alignValidation`, `statistics`, `validate` or `photoTile`. |
 | `path` | string | The file to read: an absolute path. See section 6 for `path64`. |
 | `out` | string | The file to write (a folder, for `vector` and `resizeImages`), an absolute path, for the operations that write (`thumbnail`, `photoTile`, `normalize`, `geoproject`, `cog`, `copc`, `vector`, `sampleCloud`, `mask`, `resizeImages`, `mergeBands`, `mergePreview`, `align`). The folder it lies in exists and is the only place the operation writes to (for `cog`, a scratch file or two and the statistics beside the COG; for `copc`, the temporary files of the build). See section 6 for `out64`. |
 | `params` | object | The members the operation defines. A missing `params` is an empty object. |
