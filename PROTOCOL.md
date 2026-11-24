@@ -61,9 +61,9 @@ Every request is an object:
 | Member | Type | Meaning |
 | --- | --- | --- |
 | `id` | integer | A signed 64-bit integer, echoed in the response. |
-| `op` | string | The operation: `probe`, `thumbnail`, `normalize`, `geoproject`, `cog`, `copc`, `vector`, `pointCloudInfo`, `sampleCloud`, `mask`, `rasterShapes`, `resizeImages`, `mergeBands`, `mergePreview`, `align` or `alignValidation`. |
+| `op` | string | The operation: `probe`, `thumbnail`, `normalize`, `geoproject`, `cog`, `copc`, `vector`, `pointCloudInfo`, `sampleCloud`, `mask`, `rasterShapes`, `resizeImages`, `mergeBands`, `mergePreview`, `align`, `alignValidation`, `statistics` or `photoTile`. |
 | `path` | string | The file to read: an absolute path. See section 6 for `path64`. |
-| `out` | string | The file to write (a folder, for `vector` and `resizeImages`), an absolute path, for the operations that write (`thumbnail`, `normalize`, `geoproject`, `cog`, `copc`, `vector`, `sampleCloud`, `mask`, `resizeImages`, `mergeBands`, `mergePreview`, `align`). The folder it lies in exists and is the only place the operation writes to (for `cog`, a scratch file or two and the statistics beside the COG; for `copc`, the temporary files of the build). See section 6 for `out64`. |
+| `out` | string | The file to write (a folder, for `vector` and `resizeImages`), an absolute path, for the operations that write (`thumbnail`, `photoTile`, `normalize`, `geoproject`, `cog`, `copc`, `vector`, `sampleCloud`, `mask`, `resizeImages`, `mergeBands`, `mergePreview`, `align`). The folder it lies in exists and is the only place the operation writes to (for `cog`, a scratch file or two and the statistics beside the COG; for `copc`, the temporary files of the build). See section 6 for `out64`. |
 | `params` | object | The members the operation defines. A missing `params` is an empty object. |
 
 Members a request does not define are ignored, so that later minor versions can add optional
@@ -460,6 +460,36 @@ with `--request`, which writes progress lines.
 | --- | --- | --- |
 | `threads` | integer | The most threads of the decode, 1 to 4096. Default: `DDB_STATS_THREADS` (8). |
 
+### 3.18 `photoTile` (1.6)
+
+```json
+{"id":23,"op":"photoTile","path":"/data/ds/photo.jpg","out":"/tmp/ddb/req-3/tile.png","params":{"width":4000,"height":3000,"footprint":[[9.1,45.3],[9.1,45.2],[9.2,45.2],[9.2,45.3]],"z":19,"x":274569,"y":187245,"tileSize":256,"format":"png"}}
+```
+
+Writes one web map tile (EPSG:3857, the tiles of zoom `z` numbering 2^`z` on each axis) of a photo to
+`out`, drawn from the photo for this request: nothing is kept between requests. The helper reads no
+EXIF: the client says where the photo is. The photo is placed on the ground by its corners as ground
+control points (their homography, as `cog` places a photo) and warped to the tile, bilinear (the nearest
+pixel for a palette), from the smallest level of the photo with the pixels the tile needs: a JPEG
+preview of the same framing (Multi-Picture Format) with four times those pixels, else an overview of the
+photo of its framing (the EXIF thumbnail of a JPEG, which GDAL lists among its overviews, is not one
+unless its framing is the photo's). The tile is transparent outside the footprint; a tile that holds
+none of it is transparent without the photo being opened. The colours of an 8-bit photo are kept; other
+data is stretched over the minimum to the maximum of each band of the whole photo, as its `thumbnail`.
+Served by a worker of `--serve`, as `thumbnail`, with its limits.
+
+| `params` member | Type | Meaning |
+| --- | --- | --- |
+| `width`, `height`, `footprint` | | The photo, as for `geoproject`. Required. |
+| `z` | integer | The zoom level, 0 to 30. Required. |
+| `x`, `y` | integer | The column and the row of the tile, 0 to 2^`z` - 1. Required. |
+| `tms` | boolean | `y` counts from the south (TMS) instead of the north (XYZ). Default false. |
+| `tileSize` | integer | The side of the tile in pixels: a power of two from 1 to 4096. Required. |
+| `format` | string | The encoding of the tile: `"png"`, `"jpg"` or `"webp"` (JPEG has no alpha: transparent pixels are white). Required. |
+
+The result is `{"bytes": <size of the file written>}`. A photo that cannot be opened is
+`error: "unreadable"`; params that are not these are `error: "internal"`.
+
 ## 4. Responses
 
 A success: `{"id": <id>, "ok": true, "result": {...}}`. A failure:
@@ -487,7 +517,7 @@ with an `id` it did not ask for as a broken program.
 | --- | --- |
 | Request line, response line | 16 MiB |
 | `message` of a failure | 2000 bytes |
-| Wall time of `probe` and `thumbnail` | 30 s (the client's timeout) |
+| Wall time of `probe`, `thumbnail` and `photoTile` | 30 s (the client's timeout) |
 | Wall time of `normalize` | 120 s (the client's timeout) |
 | Pixels of a raster to `normalize` | 1 000 000 000 (width times height) |
 | Time of `cog`, `copc`, `vector`, `geoproject`, `mask`, `rasterShapes`, `resizeImages`, `mergeBands`, `mergePreview`, `align`, `alignValidation`, `statistics` and `validate` | no limit of the protocol: the client ends the process after an idle time without a line, or at its maximum run time |
@@ -554,11 +584,11 @@ What a worker may do once confined (Linux; README.md has the details and the oth
 * **Not** open a network socket, start a program or another process (a thread is allowed), leave
   its process group, trace another process or signal another process.
 * **Limits**, set for each request from its operation: cpu time below the client's wait (25 s for
-  `probe` and `thumbnail`, 110 s for `normalize`; `cog`, `copc`, `vector`, `geoproject`, `mask`, `rasterShapes`, `resizeImages`, `mergeBands`, `mergePreview`, `align`, `alignValidation`, `statistics` and `validate` the run time
+  `probe`, `thumbnail` and `photoTile`, 110 s for `normalize`; `cog`, `copc`, `vector`, `geoproject`, `mask`, `rasterShapes`, `resizeImages`, `mergeBands`, `mergePreview`, `align`, `alignValidation`, `statistics` and `validate` the run time
   of the client for each thread), address space (a share of the memory of the machine or its
   container; for `copc` plus the size of its point clouds, which the builder maps whole), the size of a file written, open files, no core files. A limit the process already
   has from its starter (`ulimit`, a container) is never raised. The cpu time of a process is that
-  of all its threads, so `probe`, `thumbnail` and `normalize` run GDAL on one thread
+  of all its threads, so `probe`, `thumbnail`, `photoTile` and `normalize` run GDAL on one thread
   (`GDAL_NUM_THREADS` 1, whatever the environment says): a format GDAL decodes on one thread per CPU
   (JPEG 2000, a VRT of several files) would reach the limit after a fraction of the time.
 

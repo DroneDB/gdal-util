@@ -63,6 +63,16 @@ namespace gdalutil
             return {{"bytes", ec ? 0 : static_cast<uint64_t>(bytes)}};
         }
 
+        json photoTile(const Request &request)
+        {
+            const auto params = raster::photoTileParamsFromJson(request.params);
+            const fs::path &out = requiredPath(request.out, "out");
+            raster::photoTile(requiredPath(request.path, "path"), out, params);
+            std::error_code ec;
+            const auto bytes = fs::file_size(out, ec);
+            return {{"bytes", ec ? 0 : static_cast<uint64_t>(bytes)}};
+        }
+
         // Each of the operations below writes the file (or folder) `out` names; the host checks
         // it and moves it where it belongs
         json cog(const Request &request, const raster::ProgressCallback &progress)
@@ -137,6 +147,8 @@ namespace gdalutil
                 return [&request] { return pointCloudInfo(request); };
             if (request.op == raster::op::kThumbnail)
                 return onOneGdalThread([&request] { return thumbnail(request); });
+            if (request.op == raster::op::kPhotoTile)
+                return onOneGdalThread([&request] { return photoTile(request); });
             if (request.op == raster::op::kNormalize)
                 return onOneGdalThread([&request] { return normalize(request); });
             if (request.op == raster::op::kCog || request.op == raster::op::kCopc || request.op == raster::op::kVector ||
