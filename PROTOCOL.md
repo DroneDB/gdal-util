@@ -1,6 +1,6 @@
 # gdal-util protocol
 
-**Protocol version 1.4**
+**Protocol version 1.5**
 
 SPDX-License-Identifier: CC0-1.0
 
@@ -179,6 +179,7 @@ bytes of the input.
 | `params` member | Type | Meaning |
 | --- | --- | --- |
 | `threads` | integer | The most threads the warp and the compression may use, 1 to 4096; the client holds that many tokens of its own CPU budget. Default: what the environment of the process allows (`DDB_BUILD_THREADS`). |
+| `sourceStatistics` | boolean | (1.5) Also writes `<out>.source.stats.json`: the exact statistics of the pixels of `path` (not of the COG: before the warp, the resampling and the encoding), counted in the same pass as the build reads them, in the schema of `<out>.stats.json`. Their rules are those of `statistics` (section 3.16). Default false. |
 
 The result is `{}`. A raster without a projection is `error: "unreadable"`. A full device is
 `error: "nospace"`.
@@ -419,6 +420,27 @@ not good enough) are `error: "internal"` with why.
 "warnings", "summary": {"sourceCrs", "referenceCrs", "crsMismatch", "overlapPercent", "sourceType",
 "referenceType", "sourceGsdM", "referenceGsdM"}}`. Both run only with `--request`.
 
+### 3.16 `statistics` (1.5)
+
+```json
+{"id":21,"op":"statistics","path":"/data/ds/ortho.tif","params":{"threads":4}}
+```
+
+Reads every pixel of every band of the raster `path` (no `out`) and returns their exact statistics:
+`{"bands": {"<band>": {"min", "max", "mean", "std", "valid", "total"}}}`, bands from 1, a band without
+a pixel with a value left out. A GeoTIFF is read by ddb-tilers, the reader of the `cog` build, so the
+values are those `sourceStatistics` counts; any other raster by GDAL, with the same rules. A pixel has
+no value when it is not finite, at the NoData value (the band's own, or `nodata`), 0 in the
+per-dataset mask, or (without NoData nor mask) 0 in the alpha band of a 2- or 4-band 8 or 16-bit
+raster; a complex band is measured by its magnitude; the values are raw (no scale or offset); the
+alpha band has statistics too. The sums are exact (double-double), so the values do not depend on the
+threads. Runs only with `--request`, which writes progress lines.
+
+| `params` member | Type | Meaning |
+| --- | --- | --- |
+| `nodata` | number | A finite NoData value that replaces the one of every band. Default: each band's own. |
+| `threads` | integer | The most threads of the pass, 1 to 4096. Default: `DDB_STATS_THREADS` (8). |
+
 ## 4. Responses
 
 A success: `{"id": <id>, "ok": true, "result": {...}}`. A failure:
@@ -449,7 +471,7 @@ with an `id` it did not ask for as a broken program.
 | Wall time of `probe` and `thumbnail` | 30 s (the client's timeout) |
 | Wall time of `normalize` | 120 s (the client's timeout) |
 | Pixels of a raster to `normalize` | 1 000 000 000 (width times height) |
-| Time of `cog`, `copc`, `vector`, `geoproject`, `mask`, `rasterShapes`, `resizeImages`, `mergeBands`, `mergePreview`, `align` and `alignValidation` | no limit of the protocol: the client ends the process after an idle time without a line, or at its maximum run time |
+| Time of `cog`, `copc`, `vector`, `geoproject`, `mask`, `rasterShapes`, `resizeImages`, `mergeBands`, `mergePreview`, `align`, `alignValidation` and `statistics` | no limit of the protocol: the client ends the process after an idle time without a line, or at its maximum run time |
 | Cpu time, memory, file size and open files of a worker | by operation, section 9 |
 
 ## 6. Text that is not UTF-8
@@ -513,7 +535,7 @@ What a worker may do once confined (Linux; README.md has the details and the oth
 * **Not** open a network socket, start a program or another process (a thread is allowed), leave
   its process group, trace another process or signal another process.
 * **Limits**, set for each request from its operation: cpu time below the client's wait (25 s for
-  `probe` and `thumbnail`, 110 s for `normalize`; `cog`, `copc`, `vector`, `geoproject`, `mask`, `rasterShapes`, `resizeImages`, `mergeBands`, `mergePreview`, `align` and `alignValidation` the run time
+  `probe` and `thumbnail`, 110 s for `normalize`; `cog`, `copc`, `vector`, `geoproject`, `mask`, `rasterShapes`, `resizeImages`, `mergeBands`, `mergePreview`, `align`, `alignValidation` and `statistics` the run time
   of the client for each thread), address space (a share of the memory of the machine or its
   container; for `copc` plus the size of its point clouds, which the builder maps whole), the size of a file written, open files, no core files. A limit the process already
   has from its starter (`ulimit`, a container) is never raised. The cpu time of a process is that
