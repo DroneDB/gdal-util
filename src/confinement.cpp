@@ -60,7 +60,7 @@ namespace gdalutil
         };
 
         // probe: reads and writes nothing, the descriptors of a file and its sidecars
-        // thumbnail: a WebP the client accepts up to 64 MiB (raster_helper.h)
+        // thumbnail and photoTile: an image the client accepts up to 64 MiB (raster_helper.h)
         Limits probeLimits()
         {
             return {static_cast<uint64_t>((raster::kProbeTimeout - kQuickCpuMargin).count()), 1, 4, 2 * kGiB, 16 * kMiB, 256};
@@ -111,7 +111,7 @@ namespace gdalutil
         {
             if (request.op == op::kProbe)
                 return probeLimits();
-            if (request.op == op::kThumbnail)
+            if (request.op == op::kThumbnail || request.op == op::kPhotoTile)
                 return thumbnailLimits();
             if (request.op == op::kCog || request.op == op::kCopc || request.op == op::kVector ||
                 request.op == op::kGeoproject || raster::isHelperOperation(request.op))
