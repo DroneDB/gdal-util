@@ -1,6 +1,6 @@
 # gdal-util protocol
 
-**Protocol version 1.5**
+**Protocol version 1.6**
 
 SPDX-License-Identifier: CC0-1.0
 
@@ -441,6 +441,25 @@ threads. Runs only with `--request`, which writes progress lines.
 | `nodata` | number | A finite NoData value that replaces the one of every band. Default: each band's own. |
 | `threads` | integer | The most threads of the pass, 1 to 4096. Default: `DDB_STATS_THREADS` (8). |
 
+### 3.17 `validate` (1.6)
+
+```json
+{"id":22,"op":"validate","path":"/data/ds/ortho.tif","params":{"threads":4}}
+```
+
+Tells whether ddb-tilers reads the raster `path` whole (no `out`), so that a client may read the file
+with ddb-tilers itself, outside the confinement. ddb-tilers opens the file and decodes every block of
+every level with the masks: the full resolution in the exact pass of `statistics` (section 3.16),
+then each overview. The result is `{"hostReadable": true, "bands": ...}`, with `bands` as `statistics`
+returns it for the full resolution, or `{"hostReadable": false, "reason": "..."}` (at most 2000 bytes)
+for a file ddb-tilers does not open (not a TIFF or a BigTIFF) or a block it cannot decode. Neither is a
+failure; a crash or a limit of the worker is, and a client treats it as not host readable. Runs only
+with `--request`, which writes progress lines.
+
+| `params` member | Type | Meaning |
+| --- | --- | --- |
+| `threads` | integer | The most threads of the decode, 1 to 4096. Default: `DDB_STATS_THREADS` (8). |
+
 ## 4. Responses
 
 A success: `{"id": <id>, "ok": true, "result": {...}}`. A failure:
@@ -471,7 +490,7 @@ with an `id` it did not ask for as a broken program.
 | Wall time of `probe` and `thumbnail` | 30 s (the client's timeout) |
 | Wall time of `normalize` | 120 s (the client's timeout) |
 | Pixels of a raster to `normalize` | 1 000 000 000 (width times height) |
-| Time of `cog`, `copc`, `vector`, `geoproject`, `mask`, `rasterShapes`, `resizeImages`, `mergeBands`, `mergePreview`, `align`, `alignValidation` and `statistics` | no limit of the protocol: the client ends the process after an idle time without a line, or at its maximum run time |
+| Time of `cog`, `copc`, `vector`, `geoproject`, `mask`, `rasterShapes`, `resizeImages`, `mergeBands`, `mergePreview`, `align`, `alignValidation`, `statistics` and `validate` | no limit of the protocol: the client ends the process after an idle time without a line, or at its maximum run time |
 | Cpu time, memory, file size and open files of a worker | by operation, section 9 |
 
 ## 6. Text that is not UTF-8
@@ -535,7 +554,7 @@ What a worker may do once confined (Linux; README.md has the details and the oth
 * **Not** open a network socket, start a program or another process (a thread is allowed), leave
   its process group, trace another process or signal another process.
 * **Limits**, set for each request from its operation: cpu time below the client's wait (25 s for
-  `probe` and `thumbnail`, 110 s for `normalize`; `cog`, `copc`, `vector`, `geoproject`, `mask`, `rasterShapes`, `resizeImages`, `mergeBands`, `mergePreview`, `align`, `alignValidation` and `statistics` the run time
+  `probe` and `thumbnail`, 110 s for `normalize`; `cog`, `copc`, `vector`, `geoproject`, `mask`, `rasterShapes`, `resizeImages`, `mergeBands`, `mergePreview`, `align`, `alignValidation`, `statistics` and `validate` the run time
   of the client for each thread), address space (a share of the memory of the machine or its
   container; for `copc` plus the size of its point clouds, which the builder maps whole), the size of a file written, open files, no core files. A limit the process already
   has from its starter (`ulimit`, a container) is never raised. The cpu time of a process is that
